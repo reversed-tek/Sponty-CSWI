@@ -310,7 +310,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   }
   function exportVisibleCsv(){
     const columns=['reference','title','status','location','starts_at','ends_at','participant_count','bus_required','equipment','created_at'] as const;
-    const cell=(value:unknown)=>{const raw=String(value??''); const safe=/^[\\s\\u0000-\\u001f]*[=+\\-@]/u.test(raw)?"'"+raw:raw; return '"'+safe.replaceAll('"','""')+'"';};
+    const cell=(value:unknown)=>{const raw=String(value??''); const safe=/^[\s\u0000-\u001f]*[=+\-@]/u.test(raw)?"'"+raw:raw; return '"'+safe.replaceAll('"','""')+'"';};
     const csv=[columns.join(','),...visible.map(r=>columns.map(c=>cell(r[c])).join(','))].join('\r\n');
     const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
     const link=document.createElement('a');
