@@ -179,11 +179,11 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     if(!Number.isFinite(start.getTime())||!Number.isFinite(end.getTime())||end<=start){setResourceOptions([]);return;}
     let cancelled=false;
     setResourceChecking(true);
-    void supabase.rpc('available_resources',{from_time:start.toISOString(),to_time:end.toISOString()})
+    void Promise.resolve(supabase.rpc('available_resources',{from_time:start.toISOString(),to_time:end.toISOString()}))
       .then(({data,error:e})=>{
         if(cancelled)return;
         if(e)setError(e.message);
-        else setResourceOptions((data||[]).map(x=>({id:x.id,name:x.name,kind:x.kind,capacity:x.capacity,available:x.available,active:true})));
+        else setResourceOptions((data||[]).map((x:{id:string;name:string;kind:string;capacity:number;available:boolean})=>({id:x.id,name:x.name,kind:x.kind,capacity:x.capacity,available:x.available,active:true})));
       }).finally(()=>{if(!cancelled)setResourceChecking(false);});
     return ()=>{cancelled=true;};
   },[page,user?.id,form.starts_at,form.ends_at]);
@@ -192,7 +192,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     if(page!=='analytics'||!isAdmin)return;
     let cancelled=false;
     setAnalyticsLoading(true);
-    void supabase.from('request_events').select('*').order('created_at',{ascending:false}).limit(5000)
+    void Promise.resolve(supabase.from('request_events').select('*').order('created_at',{ascending:false}).limit(5000))
       .then(({data,error:e})=>{if(!cancelled){if(e)setError(e.message);else setAnalyticsEvents(data as Event[]||[]);}})
       .finally(()=>{if(!cancelled)setAnalyticsLoading(false);});
     return ()=>{cancelled=true;};
