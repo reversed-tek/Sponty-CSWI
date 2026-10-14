@@ -173,6 +173,46 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     return ()=>window.clearInterval(timer);
   },[user?.id,refresh]);
 
+  useEffect(()=>{
+    if(page!=='new'||!user||!form.starts_at||!form.ends_at) {setResourceOptions([]);return;}
+    const start=new Date(form.starts_at), end=new Date(form.ends_at);
+    if(!Number.isFinite(start.getTime())||!Number.isFinite(end.getTime())||end<=start){setResourceOptions([]);return;}
+    let cancelled=false;
+    setResourceChecking(true);
+    void supabase.rpc('available_resources',{from_time:start.toISOString(),to_time:end.toISOString()})
+      .then(({data,error:e})=>{
+        if(cancelled)return;
+        if(e)setError(e.message);
+        else setResourceOptions((data||[]).map(x=>({id:x.id,name:x.name,kind:x.kind,capacity:x.capacity,available:x.available,active:true})));
+      }).finally(()=>{if(!cancelled)setResourceChecking(false);});
+    return ()=>{cancelled=true;};
+  },[page,user?.id,form.starts_at,form.ends_at]);
+
+  useEffect(()=>{
+    if(page!=='analytics'||!isAdmin)return;
+    let cancelled=false;
+    setAnalyticsLoading(true);
+    void supabase.from('request_events').select('*').order('created_at',{ascending:false}).limit(5000)
+      .then(({data,error:e})=>{if(!cancelled){if(e)setError(e.message);else setAnalyticsEvents(data as Event[]||[]);}})
+      .finally(()=>{if(!cancelled)setAnalyticsLoading(false);});
+    return ()=>{cancelled=true;};
+  },[page,isAdmin]);
+
+  const suggestedFromEmail=useMemo(()=>mail ? proposeEmailFields(mail.preview) : [],[mail]);
+
+  const setChecklist=(name:string,value:boolean|number)=>{
+    setForm(old=>({...old,checklist_answers:{...old.checklist_answers,[name]:value}}));
+  };
+
+  const prettyEvent=(event:Event)=>{
+    if(event.event!=='fields_changed')return event.detail;
+    try {
+      const record=JSON.parse(event.detail) as {changes?:Record<string,{before:unknown;after:unknown}>};
+      return Object.entries(record.changes||{}).map(([field,v])=>
+        field.replaceAll('_',' ')+': '+JSON.stringify(v.before)+' → '+JSON.stringify(v.after)).join('; ');
+    }catch{return 'Fields updated';}
+  };
+
   async function execute(action:()=>Promise<void>,success='Saved successfully') {
     setBusy(true);setError('');setNotice('');
     try {await action();await refresh();if(selectedId)await reloadDetails(selectedId);setNotice(success);}
