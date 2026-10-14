@@ -2,7 +2,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public,extensions;
-select plan(12);
+select plan(13);
 
 -- Real auth users exercise the profile trigger and PostgREST-like RLS context.
 insert into auth.users(instance_id,id,aud,role,email,encrypted_password,email_confirmed_at)
@@ -24,11 +24,11 @@ select has_column('service_requests','activity_type','Activity type is stored');
 insert into public.resources(id,name,kind,capacity) values
 ('00000000-0000-4000-8000-000000000561','Test minibus 561','bus',20),
 ('00000000-0000-4000-8000-000000000562','Test minibus 562','bus',20);
-insert into public.service_requests(id,created_by,title,description,location,starts_at,ends_at)
+insert into public.service_requests(id,created_by,title,description,location,starts_at,ends_at,department)
 values
-('00000000-0000-4000-8000-000000000571','00000000-0000-4000-8000-000000000551','Minibus request A','Test fixture event request','School',now()+interval '1 day',now()+interval '2 days'),
-('00000000-0000-4000-8000-000000000572','00000000-0000-4000-8000-000000000551','Minibus request B','Test fixture event request','School',now()+interval '1 day',now()+interval '2 days'),
-('00000000-0000-4000-8000-000000000573','00000000-0000-4000-8000-000000000551','Automatic route','Test fixture event request','School',now()+interval '3 days',now()+interval '4 days');
+('00000000-0000-4000-8000-000000000571','00000000-0000-4000-8000-000000000551','Minibus request A','Test fixture event request','School',now()+interval '1 day',now()+interval '2 days',''),
+('00000000-0000-4000-8000-000000000572','00000000-0000-4000-8000-000000000551','Minibus request B','Test fixture event request','School',now()+interval '1 day',now()+interval '2 days',''),
+('00000000-0000-4000-8000-000000000573','00000000-0000-4000-8000-000000000551','Automatic route','Test fixture event request','School',now()+interval '3 days',now()+interval '4 days','Events');
 insert into public.resource_bookings(request_id,resource_id,during)
 values ('00000000-0000-4000-8000-000000000571','00000000-0000-4000-8000-000000000561',
 tstzrange(now()+interval '1 day',now()+interval '2 days','[)'));
@@ -58,10 +58,12 @@ $$select public.transition_request('00000000-0000-4000-8000-000000000573','submi
 -- Fixture department must match routing rule; stage construction happens on submit.
 select is((select status::text from public.service_requests where id='00000000-0000-4000-8000-000000000573'),
  'pending','Submitted request remains pending');
+select is((select count(*) from public.approval_stages where request_id='00000000-0000-4000-8000-000000000573'),2::bigint,
+ 'Two sequential reviewers are assigned by the routing rule');
 select is((select count(*) from public.resource_bookings),2::bigint,
  'Submit does not hold additional bookings');
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000552',true);
-select is((select count(*) from public.service_requests),0::bigint,
- 'RLS keeps unrelated requests hidden from the first reviewer');
+do $jwt$ begin perform set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000552',true); end $jwt$;
+select is((select count(*) from public.service_requests),1::bigint,
+ 'RLS grants stage-one reviewer only the routed request');
 select * from finish();
 rollback;
