@@ -53,6 +53,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   const [resourceChecking,setResourceChecking]=useState(false);
   const [resources,setResources]=useState<Resource[]>([]);
   const [rules,setRules]=useState<Rule[]>([]);
+  const [delegations,setDelegations]=useState<{id:string;principal_id:string;delegate_id:string;starts_at:string;ends_at:string}[]>([]);
   const [resourceNames,setResourceNames]=useState<string[]>([]);
   const [approvalStages,setApprovalStages]=useState<{stage:number;approver_id:string;status:string}[]>([]);
   const [analyticsEvents,setAnalyticsEvents]=useState<Event[]>([]);
@@ -120,11 +121,13 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       if(rr.error) throw rr.error;
       setPeople(pr.data as Profile[] || []);
       setUserRoles(rr.data as {user_id:string;role:Role}[] || []);
-      const [res,rulesResult]=await Promise.all([supabase.from('resources').select('*').order('name'),supabase.from('approval_rules').select('*').order('priority')]);
+      const [res,rulesResult,delegationsResult]=await Promise.all([supabase.from('resources').select('*').order('name'),supabase.from('approval_rules').select('*').order('priority'),supabase.from('approval_delegations').select('*').order('starts_at',{ascending:false})]);
       if(res.error)throw res.error;
       if(rulesResult.error)throw rulesResult.error;
+      if(delegationsResult.error)throw delegationsResult.error;
       setResources(res.data as Resource[]||[]);
       setRules(rulesResult.data as Rule[]||[]);
+      setDelegations(delegationsResult.data||[]);
     } else setPeople([]);
   },[user?.id]);
 
@@ -468,7 +471,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
         </section>:
       page==='notifications'?
         <NotificationsPanel items={notifications} busy={busy} onOpen={openNotification} onMarkRead={n=>void markNotificationRead(n)} requests={requests} userId={user.id} onApprove={n=>void quickDecision(n,'approve','')} onReject={(n,why)=>void quickDecision(n,'reject',why)}/>:
-      page==='operations'&&isAdmin?<section><h2>Operations setup</h2><ResourceAdmin onSaved={refresh}/><div className="panel"><h3>Registered resources</h3>{resources.map(x=><div className="row-item" key={x.id}><span>{x.name} — {x.kind}, capacity {x.capacity}</span><span>{x.active?'Active':'Inactive'}</span></div>)}</div><RoutingAdmin people={people.filter(p=>userRoles.some(x=>x.user_id===p.id&&(x.role==='approver'||x.role==='admin')))} rules={rules} onSaved={refresh}/></section>:
+      page==='operations'&&isAdmin?<section><h2>Operations setup</h2><ResourceAdmin onSaved={refresh}/><div className="panel"><h3>Registered resources</h3>{resources.map(x=><div className="row-item" key={x.id}><span>{x.name} — {x.kind}, capacity {x.capacity}</span><span>{x.active?'Active':'Inactive'}</span></div>)}</div><RoutingAdmin people={people.filter(p=>userRoles.some(x=>x.user_id===p.id&&(x.role==='approver'||x.role==='admin')))} rules={rules} delegations={delegations} onSaved={refresh}/></section>:
       page==='analytics'&&isAdmin?<AnalyticsPanel requests={requests} events={analyticsEvents} loading={analyticsLoading}/>:
         <section>
           <div className="titleline"><div><h2>{page==='approvals'?'Pending approvals':page==='all'?'All requests':'My requests'}</h2><p className="muted">{visible.length} request(s) visible</p></div><button className="primary compact" onClick={()=>startForm()}><Plus size={16}/> New</button></div>
