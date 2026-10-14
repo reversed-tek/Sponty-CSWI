@@ -3,7 +3,7 @@
 The target is an Outlook add-in used with **Microsoft 365 Exchange Online mailboxes** in your Entra developer tenant. A directory without licensed/usable Exchange Online mailboxes is insufficient to test the Outlook integration.
 
 ## 1. Entra application
-1. Go to Entra admin center → App registrations → New registration.
+1. Go to Entra admin center → App registrations → New registration..
 2. Name it Sponty CSWI; choose **Accounts in this organizational directory only**.
 3. Add a **Web** redirect URI: https://YOUR_PROJECT.supabase.co/auth/v1/callback
 4. Save the client ID and tenant ID, and create a client secret (store it only in Supabase).
