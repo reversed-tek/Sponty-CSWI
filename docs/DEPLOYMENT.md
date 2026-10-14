@@ -73,6 +73,15 @@ The initial command is a **Message Read** add-in and generally requires a select
 
 **Heads-up:** Outlook categories are intentionally not auto-managed in this release. Creating mailbox-level master categories requires the broader ReadWriteMailbox permission; this add-in avoids that permission.
 
+## 5a. PR #4 core hardening (run after PR #2 migration)
+1. Run `supabase/migrations/202610140004_core_hardening.sql` **after** `202610140003_notifications.sql`. This changes server-side transition rules; deploy the PR #4 client only after the database migration succeeds.
+2. Existing files retain the **supporting** classification. While an activity is **In progress**, upload new proof through **Upload completion evidence**; the database rejects completion without a valid evidence record.
+3. Verify that a requester with an Admin role still cannot approve their own request, and an Admin cannot assign the requester as their own reviewer.
+4. Verify that approver/admin approvals, requester cancellations and administrative cancellations create notifications for other Admins.
+5. The notification worker processes at most 100 queued records per **daily** invocation using bounded concurrency. Large backlogs require additional scheduled executions. Keep optional email delivery disabled if the Resend integration is not configured.
+6. To run DB regression tests on a **local** Supabase stack (Docker required), use `supabase start` then `supabase test db`. The GitHub Actions build validates TypeScript and manifest XML, but does not currently execute database tests.
+7. **No Outlook manifest change** is necessary for these UI/database changes.
+
 ## 6. Acceptance test plan
 1. Requestor creates a draft from an email, edits it, submits it and sees only their own requests.
 2. Admin assigns an Approver and coordinates equipment and school bus.
