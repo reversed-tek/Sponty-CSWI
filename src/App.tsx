@@ -124,7 +124,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   async function execute(action:()=>Promise<void>,success='Saved successfully') {
     setBusy(true);setError('');setNotice('');
     try {await action();await refresh();if(selectedId)await reloadDetails(selectedId);setNotice(success);}
-    catch(e){setError(errorText(e));}finally{setBusy(false);}
+    catch(e){setError(errorText(e));try{await refresh();}catch{/* Retain the original error. */}}finally{setBusy(false);}
   }
   async function login(){
     if(!configured)return;
@@ -170,7 +170,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       }
       if(submit){
         const {error:e}=await supabase.rpc('transition_request',{rid:id,action:'submit',reason:''});
-        if(e)throw e;
+        if(e){setPage('my');setSelectedId(id||null);throw new Error('Request saved as a draft, but submission failed: '+e.message);}
       }
       setPage('my');setSelectedId(id||null);
     },submit?'Request submitted':'Draft saved');
@@ -218,7 +218,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   async function linkEmail(){
     if(!selected||!mail?.id||!user) return;
     await execute(async()=>{
-      const {error:e}=await supabase.from('email_links').upsert({request_id:selected.id,linked_by:user.id,message_id:mail.id,subject:mail.subject},{onConflict:'request_id,message_id'});
+      const {error:e}=await supabase.from('email_links').upsert({request_id:selected.id,linked_by:user.id,message_id:mail.id,subject:mail.subject},{onConflict:'request_id,message_id',ignoreDuplicates:true});
       if(e)throw e;
     },'Email linked to request');
   }
