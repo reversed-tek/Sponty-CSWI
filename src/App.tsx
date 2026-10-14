@@ -273,6 +273,20 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       setPage('my');setSelectedId(id||null);
     },submit?'Request submitted':'Draft saved');
   }
+  async function quickDecision(notification:AppNotification, action:'approve'|'reject',reasonText:string) {
+    if(!notification.request_id||!user)return;
+    const request=requests.find(r=>r.id===notification.request_id);
+    if(!request||request.approver_id!==user.id||request.created_by===user.id||request.status!=='pending'){
+      setError('This request is no longer assigned to you for approval. Refresh and open it to review.');
+      return;
+    }
+    await execute(async()=>{
+      const {error:e}=await supabase.rpc('transition_request',{rid:request.id,action,reason:reasonText});
+      if(e)throw e;
+      await supabase.rpc('mark_notification_read',{nid:notification.id});
+    },action==='approve'?'Approval stage recorded':'Request rejected');
+  }
+
   async function move(action:string){
     if(!selected)return;
     await execute(async()=>{
