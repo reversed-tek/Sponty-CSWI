@@ -260,6 +260,31 @@ begin
  return r;
 end $$;
 
+-- Manual admin reassignment must keep the currently active approval stage in sync.
+create or replace function public.assign_approver(rid uuid, reviewer uuid)
+returns public.service_requests language plpgsql security definer set search_path = '' as $
+declare r public.service_requests; stage_num integer;
+begin
+ if not public.is_role('admin') then raise exception 'Admin role required'; end if;
+ if not exists(select 1 from public.user_roles where user_id=reviewer and role in ('approver','admin'))
+ then raise exception 'User is not an approver'; end if;
+ select * into r from public.service_requests where id=rid for update;
+ if not found or r.status not in ('draft','pending','changes_requested') then
+   raise exception 'Cannot assign this request'; end if;
+ if r.created_by=reviewer then raise exception 'A requestor cannot be their own approver'; end if;
+ update public.service_requests set approver_id=reviewer,updated_at=now() where id=rid returning * into r;
+ select min(stage) into stage_num from public.approval_stages
+ where request_id=rid and status='pending';
+ if stage_num is not null then
+   update public.approval_stages set approver_id=reviewer
+   where request_id=rid and stage=stage_num;
+ end if;
+ insert into public.request_events(request_id,actor_id,event,detail)
+ values(rid,auth.uid(),'approver_assigned',reviewer::text);
+ if r.status='pending' then perform public.enqueue(rid,reviewer,'Assigned approval: '||r.reference,r.title); end if;
+ return r;
+end $;
+
 -- Admin-only escalation to a different permitted reviewer, after the matching
 -- rule's deadline, with an audit entry. Queue job runs with service role.
 create or replace function public.escalate_pending_approvals()
