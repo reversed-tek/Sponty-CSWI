@@ -375,3 +375,19 @@ begin
 end $$;
 revoke all on function public.queue_daily_reminders() from public,anon,authenticated;
 grant execute on function public.queue_daily_reminders() to service_role;
+
+-- Admin-only resource utilization report avoids leaking booking ownership to users.
+create or replace function public.resource_usage_summary()
+returns table(resource_id uuid,name text,kind text,active_holds bigint,reserved_hours numeric)
+language plpgsql stable security definer set search_path = '' as $$
+begin
+ if not public.is_role('admin') then raise exception 'Admin role required'; end if;
+ return query select res.id,res.name,res.kind,
+ count(b.id) filter(where b.state='held')::bigint,
+ round(coalesce(sum(extract(epoch from upper(b.during)-lower(b.during))/3600)
+   filter(where b.state='held'),0)::numeric,1)
+ from public.resources res left join public.resource_bookings b on b.resource_id=res.id
+ group by res.id,res.name,res.kind order by res.kind,res.name;
+end $$;
+revoke all on function public.resource_usage_summary() from public,anon;
+grant execute on function public.resource_usage_summary() to authenticated;
