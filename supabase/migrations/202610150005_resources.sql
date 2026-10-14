@@ -86,6 +86,19 @@ grant execute on function public.available_resources(timestamptz,timestamptz) to
 create or replace function public.check_requested_resource_availability()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
+ if new.status='pending' and old.status in ('draft','changes_requested') then
+  if new.bus_required and (
+    select coalesce(sum(res.capacity),0) from public.resource_requests rr
+    join public.resources res on res.id=rr.resource_id
+    where rr.request_id=new.id and res.active and res.kind='bus'
+  ) < new.bus_passengers then
+    raise exception 'Select enough available bus capacity for all bus passengers';
+  end if;
+  if exists(
+    select 1 from public.resource_requests rr join public.resources res on res.id=rr.resource_id
+    where rr.request_id=new.id and not res.active
+  ) then raise exception 'A requested resource has been deactivated'; end if;
+ end if;
  if new.status='pending' and old.status in ('draft','changes_requested') and exists(
   select 1 from public.resource_requests rr
   join public.resource_bookings b on b.resource_id=rr.resource_id
