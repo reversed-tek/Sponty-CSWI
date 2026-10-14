@@ -15,3 +15,4 @@ jobs:
       - run: npm run build
       - run: node scripts/generate-manifest.mjs https://cswi.example.com
       - run: python3 -c "import xml.etree.ElementTree as E; E.parse('dist-manifest/manifest.xml')"
+      - run: npx --yes office-addin-manifest@3.0.1 validate dist-manifest/manifest.xml
