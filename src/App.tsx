@@ -5,13 +5,19 @@ import { configured as hasConfig, supabase, errorText } from './lib';
 import type { AppNotification, Request, Role, Document, Event, Comment, DocumentRequest } from './lib';
 import { OutlookComposePanel } from './OutlookComposePanel';
 import { NotificationsPanel } from './NotificationsPanel';
+import { ResourcePicker, ResourceAdmin } from './ResourcesPanel';
+import type { Resource, ResourceOption } from './ResourcesPanel';
+import { RoutingAdmin } from './RoutingAdmin';
+import { AnalyticsPanel } from './AnalyticsPanel';
+import { proposeEmailFields } from './emailPrefill';
 import { calendarDraft, emailReference, inOutlook, mimeFor, oauthDialog, readAttachment, readMail, replyDraft, outlookSurface } from './office';
 import type { OutlookSurface } from './office';
 import type { Mail as SelectedMail } from './office';
 
 type Profile = { id: string; email: string; display_name: string };
-type Page = 'my' | 'approvals' | 'all' | 'new' | 'notifications';
-const blank = {title:'',description:'',department:'',location:'',starts_at:'',ends_at:'',participant_count:1,equipment:'',bus_required:false,bus_passengers:0,transport_notes:'',notes:''};
+type Page = 'my' | 'approvals' | 'all' | 'new' | 'notifications' | 'operations' | 'analytics';
+type Rule = {id:string;priority:number;department:string|null;requires_bus:boolean|null;minimum_participants:number|null;primary_approver:string;secondary_approver:string|null;escalate_after_days:number};
+const blank = {title:'',description:'',department:'',location:'',starts_at:'',ends_at:'',participant_count:1,equipment:'',bus_required:false,bus_passengers:0,transport_notes:'',notes:'',activity_type:'general',checklist_answers:{} as Record<string,number|boolean>};
 type FormValue = typeof blank;
 const fmt = (v?: string | null) => v ? new Date(v).toLocaleString() : 'Not set';
 const inputDate = (v?: string | null) => v ? new Date(new Date(v).getTime()-new Date(v).getTimezoneOffset()*60000).toISOString().slice(0,16) : '';
@@ -42,6 +48,15 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   const [selectedId,setSelectedId]=useState<string|null>(null);
   const [editing,setEditing]=useState<Request|null>(null);
   const [form,setForm]=useState<FormValue>(blank);
+  const [requestedResources,setRequestedResources]=useState<string[]>([]);
+  const [resourceOptions,setResourceOptions]=useState<ResourceOption[]>([]);
+  const [resourceChecking,setResourceChecking]=useState(false);
+  const [resources,setResources]=useState<Resource[]>([]);
+  const [rules,setRules]=useState<Rule[]>([]);
+  const [resourceNames,setResourceNames]=useState<string[]>([]);
+  const [approvalStages,setApprovalStages]=useState<{stage:number;approver_id:string;status:string}[]>([]);
+  const [analyticsEvents,setAnalyticsEvents]=useState<Event[]>([]);
+  const [analyticsLoading,setAnalyticsLoading]=useState(false);
   const [documents,setDocuments]=useState<Document[]>([]);
   const [events,setEvents]=useState<Event[]>([]);
   const [comments,setComments]=useState<Comment[]>([]);
@@ -105,6 +120,11 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       if(rr.error) throw rr.error;
       setPeople(pr.data as Profile[] || []);
       setUserRoles(rr.data as {user_id:string;role:Role}[] || []);
+      const [res,rulesResult]=await Promise.all([supabase.from('resources').select('*').order('name'),supabase.from('approval_rules').select('*').order('priority')]);
+      if(res.error)throw res.error;
+      if(rulesResult.error)throw rulesResult.error;
+      setResources(res.data as Resource[]||[]);
+      setRules(rulesResult.data as Rule[]||[]);
     } else setPeople([]);
   },[user?.id]);
 
@@ -114,7 +134,9 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       supabase.from('request_events').select('*').eq('request_id',rid).order('created_at',{ascending:false}),
       supabase.from('request_comments').select('*').eq('request_id',rid).order('created_at',{ascending:false}),
       supabase.from('document_requests').select('*').eq('request_id',rid).order('created_at',{ascending:false}),
-      supabase.from('email_links').select('message_id,subject').eq('request_id',rid)
+      supabase.from('email_links').select('message_id,subject').eq('request_id',rid),
+      supabase.from('resource_requests').select('resource_id,resources(name)').eq('request_id',rid),
+      supabase.from('approval_stages').select('stage,approver_id,status').eq('request_id',rid).order('stage')
     ]);
     const firstError=results.find(x=>x.error)?.error;
     if(firstError) throw firstError;
@@ -123,6 +145,8 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     setComments(results[2].data as Comment[]||[]);
     setDocRequests(results[3].data as DocumentRequest[]||[]);
     setLinks(results[4].data as {message_id:string;subject:string}[]||[]);
+    setResourceNames((results[5].data||[]).map((x:any)=>x.resources?.name||'Resource'));
+    setApprovalStages(results[6].data as {stage:number;approver_id:string;status:string}[]||[]);
   },[]);
 
   useEffect(()=>{if(user) void refresh().catch(e=>setError(errorText(e)));else {setRequests([]);setNotifications([]);setRoles([]);setSelectedId(null);}},[user?.id,refresh]);
@@ -175,8 +199,12 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       title:seed.title,description:seed.description,department:seed.department,location:seed.location,
       starts_at:inputDate(seed.starts_at),ends_at:inputDate(seed.ends_at),participant_count:seed.participant_count,
       equipment:seed.equipment,bus_required:seed.bus_required,bus_passengers:seed.bus_passengers,
-      transport_notes:seed.transport_notes,notes:seed.notes
+      transport_notes:seed.transport_notes,notes:seed.notes,
+      activity_type:seed.activity_type||'general',checklist_answers:seed.checklist_answers||{}
     } : {...blank,title:mail?.subject||'',description:mail?.preview||''});
+    setRequestedResources([]);
+    if(seed) void supabase.from('resource_requests').select('resource_id').eq('request_id',seed.id)
+      .then(({data,error:e})=>{if(e)setError(e.message);else setRequestedResources((data||[]).map(x=>x.resource_id));});
     setSelectedId(null);setPage('new');setNotice('');
   }
   const setField = <K extends keyof FormValue>(key:K,value:FormValue[K]) => setForm(old=>({...old,[key]:value}));
@@ -196,6 +224,8 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
         if(e)throw e;
         id=data.id;
       }
+      const {error:resourceError}=await supabase.rpc('set_request_resources',{rid:id,resource_ids:requestedResources});
+      if(resourceError)throw resourceError;
       if(submit){
         const {error:e}=await supabase.rpc('transition_request',{rid:id,action:'submit',reason:''});
         if(e){setPage('my');setSelectedId(id||null);throw new Error('Request saved as a draft, but submission failed: '+e.message);}
