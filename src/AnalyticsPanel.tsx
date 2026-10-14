@@ -1,6 +1,6 @@
 import type { Request, Event } from './lib';
 
-export function AnalyticsPanel({ requests, events, loading }: { requests: Request[]; events: Event[]; loading: boolean }) {
+export function AnalyticsPanel({ requests, events, usage, loading }: { requests: Request[]; events: Event[]; usage:{resource_id:string;name:string;kind:string;active_holds:number;reserved_hours:number}[]; loading: boolean }) {
   const eventsByRequest = new Map<string,Event[]>();
   for (const event of events) {
     const list = eventsByRequest.get(event.request_id) || [];
@@ -29,6 +29,10 @@ export function AnalyticsPanel({ requests, events, loading }: { requests: Reques
     </div>
     <div className="panel"><h3>Status distribution</h3>
       {byStatus.map(x=><div key={x.status} className="row-item"><span>{x.status.replaceAll('_',' ')}</span><strong>{x.count}</strong></div>)}
+    </div>
+    <div className="panel"><h3>Resource utilization</h3><p className="muted">Active booking holds and total reserved hours, across the available booking history.</p>
+      {usage.map(res=><div key={res.resource_id} className="row-item"><span>{res.name} <small>({res.kind})</small></span><strong>{res.active_holds} holds / {res.reserved_hours}h</strong></div>)}
+      {!usage.length&&<p className="muted">No registered resources.</p>}
     </div>
     <div className="panel"><h3>Oldest awaiting review</h3>
       {stalled.sort((a,b)=>a.updated_at.localeCompare(b.updated_at)).slice(0,10).map(r=>
