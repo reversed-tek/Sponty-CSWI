@@ -16,7 +16,7 @@ export type Request = {
   starts_at: string | null; ends_at: string | null; participant_count: number;
   equipment: string; bus_required: boolean; bus_passengers: number;
   transport_notes: string; notes: string; status: Status; resource_status: string;
-  resource_notes: string; created_at: string;
+  resource_notes: string; created_at: string; updated_at:string; activity_type:'general'|'bus_trip'|'off_site'; checklist_answers: Record<string, boolean | number>;
 };
 export type Document = { id:string; request_id:string; file_name:string; storage_path:string; mime_type:string; evidence_kind:'supporting'|'completion'; created_at:string };
 export type Event = { id:number; request_id:string; actor_id:string; event:string; detail:string; created_at:string };
