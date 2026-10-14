@@ -59,6 +59,20 @@ In Microsoft 365 Admin Center → Settings → Integrated apps → Upload custom
 
 The initial command is a **Message Read** add-in and generally requires a selected message.
 
+## PR #2 upgrade — Outlook compose, inbox and search
+
+**If you already installed PR #1:**
+
+1. Run the additional Supabase migration: `supabase/migrations/202610140003_notifications.sql`. It adds private notification read receipts and comment-driven notifications. Existing user requests are retained.
+2. Deploy the PR #2 branch to your Vercel Preview environment. Ensure the same two `VITE_` environment variables are configured for Preview. **Do not use a Preview URL with a disappearing hash as your permanent Outlook manifest origin**; use a stable production deployment domain after the PR is merged.
+3. Generate a *new* `dist-manifest/manifest.xml` with `npm run manifest -- https://YOUR_STABLE_DOMAIN`. The manifest version is now `1.1.0.0`, with **ReadWriteItem** permission. This allows inserting a reference or summary into the **current Outlook draft**, without broad mailbox access.
+4. Microsoft 365 Admin Center → Settings → Integrated apps: update/redeploy the existing add-in with the new manifest where supported. If it cannot be updated, remove the test assignment and re-upload with the same add-in ID; allow time for Outlook to refresh. Check for an admin permission approval request.
+5. Open an email in **read** mode: existing actions should remain. Open **New mail** or **Reply** in compose mode: use the *Add CSWI Reference* command and choose a request. Click **Insert reference in subject**, then **Insert request summary**. Verify both changes appear in the draft. **Send nothing automatically.**
+6. In the task pane, verify **Updates** shows notification history. Click **Mark read**, search for requests and filter by status. In Admin → All Requests, export the visible rows as CSV.
+7. Verify a user cannot view another request's notification or edit its status. Test compose and read actions in Outlook on the web and new Outlook for Windows.
+
+**Heads-up:** Outlook categories are intentionally not auto-managed in this release. Creating mailbox-level master categories requires the broader ReadWriteMailbox permission; this add-in avoids that permission.
+
 ## 6. Acceptance test plan
 1. Requestor creates a draft from an email, edits it, submits it and sees only their own requests.
 2. Admin assigns an Approver and coordinates equipment and school bus.

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { ArrowLeft, CalendarPlus, Check, FilePlus2, Inbox, Link2, LogOut, Mail, Paperclip, Plus, RefreshCw, Send, ShieldCheck, Upload, Users } from 'lucide-react';
+import { ArrowLeft, Bell, CalendarPlus, Check, Download, FilePlus2, Inbox, Link2, LogOut, Mail, Paperclip, Plus, RefreshCw, Search, Send, ShieldCheck, Upload, Users } from 'lucide-react';
 import { configured as hasConfig, supabase, errorText } from './lib';
-import type { Request, Role, Document, Event, Comment, DocumentRequest } from './lib';
-import { calendarDraft, emailReference, inOutlook, mimeFor, oauthDialog, readAttachment, readMail, replyDraft } from './office';
+import type { AppNotification, Request, Role, Document, Event, Comment, DocumentRequest } from './lib';
+import { OutlookComposePanel } from './OutlookComposePanel';
+import { NotificationsPanel } from './NotificationsPanel';
+import { calendarDraft, emailReference, inOutlook, mimeFor, oauthDialog, readAttachment, readMail, replyDraft, outlookSurface } from './office';
+import type { OutlookSurface } from './office';
 import type { Mail as SelectedMail } from './office';
 
 type Profile = { id: string; email: string; display_name: string };
-type Page = 'my' | 'approvals' | 'all' | 'new';
+type Page = 'my' | 'approvals' | 'all' | 'new' | 'notifications';
 const blank = {title:'',description:'',department:'',location:'',starts_at:'',ends_at:'',participant_count:1,equipment:'',bus_required:false,bus_passengers:0,transport_notes:'',notes:''};
 type FormValue = typeof blank;
 const fmt = (v?: string | null) => v ? new Date(v).toLocaleString() : 'Not set';
@@ -30,6 +33,11 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   const [people,setPeople]=useState<Profile[]>([]);
   const [userRoles,setUserRoles]=useState<{user_id:string;role:Role}[]>([]);
   const [mail,setMail]=useState<SelectedMail|null>(null);
+  const [surface,setSurface]=useState<OutlookSurface>('none');
+  const [mailLinkedRequestId,setMailLinkedRequestId]=useState<string|null>(null);
+  const [notifications,setNotifications]=useState<AppNotification[]>([]);
+  const [search,setSearch]=useState('');
+  const [statusFilter,setStatusFilter]=useState('all');
   const [page,setPage]=useState<Page>('my');
   const [selectedId,setSelectedId]=useState<string|null>(null);
   const [editing,setEditing]=useState<Request|null>(null);
@@ -53,7 +61,8 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   const isAdmin=roles.includes('admin');
   const canApprove=roles.includes('approver') || isAdmin;
   const selected=useMemo(()=>requests.find(r=>r.id===selectedId)||null,[requests,selectedId]);
-  const mailMatch=useMemo(()=>requests.find(r=>r.reference===emailReference(mail)),[requests,mail]);
+  const mailMatch=useMemo(()=>requests.find(r=>r.reference===emailReference(mail) || r.id===mailLinkedRequestId),[requests,mail,mailLinkedRequestId]);
+  const unread=notifications.filter(n=>!n.read_at).length;
   const pending=useMemo(()=>requests.filter(r=>r.status==='pending'&&(isAdmin||r.approver_id===user?.id)),[requests,isAdmin,user?.id]);
   const ordered=useMemo(()=>[...requests].sort((a,b)=>b.created_at.localeCompare(a.created_at)),[requests]);
 
@@ -68,7 +77,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     let disposed=false;
     void Office.onReady().then(()=>{
       if(disposed) return;
-      const reread=()=>{void readMail().then(m=>{if(!disposed)setMail(m);});};
+      const reread=()=>{setSurface(outlookSurface());void readMail().then(m=>{if(!disposed)setMail(m);}).catch(()=>{if(!disposed)setMail(null);});};
       reread();
       try {Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged,reread);} catch { /* Not every Outlook client exposes ItemChanged. */ }
     });
@@ -77,12 +86,15 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
 
   const refresh=useCallback(async()=>{
     if(!user) return;
-    const [roleResult,requestResult]=await Promise.all([
+    const [roleResult,requestResult,notificationResult]=await Promise.all([
       supabase.from('user_roles').select('role').eq('user_id',user.id),
-      supabase.from('service_requests').select('*').order('created_at',{ascending:false}).limit(200)
+      supabase.from('service_requests').select('*').order('created_at',{ascending:false}).limit(200),
+      supabase.from('notifications').select('id,request_id,subject,body,created_at,read_at').order('created_at',{ascending:false}).limit(50)
     ]);
     if(roleResult.error) throw roleResult.error;
     if(requestResult.error) throw requestResult.error;
+    if(notificationResult.error) throw notificationResult.error;
+    setNotifications(notificationResult.data as AppNotification[] || []);
     const assigned=(roleResult.data||[]).map(x=>x.role as Role);
     setRoles(assigned);
     setRequests(requestResult.data as Request[] || []);
@@ -113,7 +125,23 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     setLinks(results[4].data as {message_id:string;subject:string}[]||[]);
   },[]);
 
-  useEffect(()=>{if(user) void refresh().catch(e=>setError(errorText(e)));else {setRequests([]);setRoles([]);setSelectedId(null);}},[user?.id,refresh]);
+  useEffect(()=>{if(user) void refresh().catch(e=>setError(errorText(e)));else {setRequests([]);setNotifications([]);setRoles([]);setSelectedId(null);}},[user?.id,refresh]);
+  useEffect(()=>{
+    if(!user || !mail?.id) {setMailLinkedRequestId(null);return;}
+    let cancelled=false;
+    void supabase.from('email_links').select('request_id').eq('message_id',mail.id).limit(1)
+      .then(({data})=>{if(!cancelled)setMailLinkedRequestId(data?.[0]?.request_id||null);});
+    return ()=>{cancelled=true;};
+  },[mail?.id,user?.id]);
+  useEffect(()=>{
+    const target = new URLSearchParams(window.location.search).get('request');
+    if(!target || !requests.some(r=>r.id===target))return;
+    setSelectedId(target);
+    setPage('my');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('request');
+    window.history.replaceState(null,'',url.pathname+url.search+url.hash);
+  },[requests]);
   useEffect(()=>{if(selectedId)void reloadDetails(selectedId).catch(e=>setError(errorText(e)));},[selectedId,reloadDetails]);
   useEffect(()=>{
     if(!user) return;
@@ -220,6 +248,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     await execute(async()=>{
       const {error:e}=await supabase.from('email_links').upsert({request_id:selected.id,linked_by:user.id,message_id:mail.id,subject:mail.subject},{onConflict:'request_id,message_id',ignoreDuplicates:true});
       if(e)throw e;
+      setMailLinkedRequestId(selected.id);
     },'Email linked to request');
   }
   function replyWith(template:'status'|'document'){
@@ -262,7 +291,32 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   if(loading)return <main className="setup">Loading Sponty CSWI…</main>;
   if(!user)return <main className="signin"><div className="brand-mark"><ShieldCheck size={24}/></div><h1>Sponty CSWI</h1><p>Community service requests, approvals and document coordination — directly in Outlook.</p><button className="primary" disabled={busy} onClick={()=>void login()}>Sign in with Microsoft</button><small>Access is limited to the configured Microsoft Entra tenant.</small>{error&&<p className="error" role="alert">{error}</p>}</main>;
 
-  const visible=page==='approvals'?ordered.filter(r=>r.status==='pending'&&(isAdmin||r.approver_id===user.id)):page==='all'&&isAdmin?ordered:ordered.filter(r=>r.created_by===user.id);
+  const visibleBase=page==='approvals'?ordered.filter(r=>r.status==='pending'&&(isAdmin||r.approver_id===user.id)):page==='all'&&isAdmin?ordered:ordered.filter(r=>r.created_by===user.id);
+  const visible=visibleBase.filter(r=>(statusFilter==='all'||r.status===statusFilter)&&
+    (r.title+' '+r.reference+' '+r.location).toLowerCase().includes(search.trim().toLowerCase()));
+  async function markNotificationRead(n:AppNotification){
+    await execute(async()=>{
+      const {error:e}=await supabase.rpc('mark_notification_read',{nid:n.id});
+      if(e)throw e;
+    },'Notification marked as read');
+  }
+  function openNotification(n:AppNotification){
+    if(!n.request_id)return;
+    const target=requests.find(r=>r.id===n.request_id);
+    if(!target){setError('This request is not in your accessible recent requests. Contact an administrator if you need access.');return;}
+    setSelectedId(target.id);
+    setPage('my');
+    if(!n.read_at)void markNotificationRead(n);
+  }
+  function exportVisibleCsv(){
+    const columns=['reference','title','status','location','starts_at','ends_at','participant_count','bus_required','equipment','created_at'] as const;
+    const cell=(value:unknown)=>'"'+String(value??'').replaceAll('"','""')+'"';
+    const csv=[columns.join(','),...visible.map(r=>columns.map(c=>cell(r[c])).join(','))].join('\r\n');
+    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+    const link=document.createElement('a');
+    link.href=url;link.download='cswi-requests.csv';document.body.appendChild(link);link.click();link.remove();
+    URL.revokeObjectURL(url);
+  }
   const hasReviewer=selected && (selected.approver_id===user.id||isAdmin);
   return <div className="shell">
     <header className="header"><div className="brand"><div className="brand-mark"><ShieldCheck size={19}/></div><div><strong>Sponty CSWI</strong><small>Community Service</small></div></div><button className="icon-btn" title="Refresh" onClick={()=>void execute(refresh,'Updated')}><RefreshCw size={17}/></button></header>
@@ -270,12 +324,14 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       <button className={page==='my'?'active':''} onClick={()=>{setPage('my');setSelectedId(null);}}><Inbox size={15}/> My Requests</button>
       {canApprove&&<button className={page==='approvals'?'active':''} onClick={()=>{setPage('approvals');setSelectedId(null);}}><Check size={15}/> Approvals <span className="count">{pending.length}</span></button>}
       {isAdmin&&<button className={page==='all'?'active':''} onClick={()=>{setPage('all');setSelectedId(null);}}><Users size={15}/> All Requests</button>}
+      <button className={page==='notifications'?'active':''} onClick={()=>{setPage('notifications');setSelectedId(null);}}><Bell size={15}/> Updates {unread>0&&<span className="count">{unread}</span>}</button>
     </nav>
     <div className="content">
       <div className="user-row"><span>{user.email}</span><span className="tag">{isAdmin?'Admin':canApprove?'Approver':'Requestor'}</span><button className="text-btn" title="Sign out" onClick={()=>void supabase.auth.signOut()}><LogOut size={15}/></button></div>
       {error&&<div className="error" role="alert">{error}<button className="dismiss" onClick={()=>setError('')}>×</button></div>}
       {notice&&<div className="success" role="status">{notice}<button className="dismiss" onClick={()=>setNotice('')}>×</button></div>}
-      {mail&&<section className="mail-card"><div className="label-row"><Mail size={16}/><strong>Open email</strong></div><p className="ellipsis">{mail.subject||'(no subject)'}</p>{mailMatch?<button className="link" onClick={()=>{setSelectedId(mailMatch.id);setPage('my');}}>View linked request {mailMatch.reference} →</button>:<button className="link" onClick={()=>startForm()}>Create request from this email →</button>}</section>}
+      {surface==='compose'&&<OutlookComposePanel key={user.id+String(surface)} requests={requests} onError={setError} onNotice={setNotice}/>}
+      {mail&&surface==='read'&&<section className="mail-card"><div className="label-row"><Mail size={16}/><strong>Open email</strong></div><p className="ellipsis">{mail.subject||'(no subject)'}</p>{mailMatch?<button className="link" onClick={()=>{setSelectedId(mailMatch.id);setPage('my');}}>View linked request {mailMatch.reference} →</button>:<button className="link" onClick={()=>startForm()}>Create request from this email →</button>}</section>}
       {page==='new'?
         <section><button className="back" onClick={()=>{setPage('my');setSelectedId(editing?.id||null);}}><ArrowLeft size={15}/> Back</button><h2>{editing?'Edit request':'New request'}</h2>
           <form onSubmit={e=>{e.preventDefault();void saveRequest(false);}}>
@@ -319,9 +375,18 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
           <section className="panel"><h3>Comments & notes</h3>{comments.map(c=><div key={c.id} className="comment"><small>{fmt(c.created_at)} {c.internal?'· Internal':''}</small><p>{c.body}</p></div>)}<label>Add a comment<textarea rows={2} value={comment} onChange={e=>setComment(e.target.value)}/></label>{hasReviewer&&<label className="checkbox"><input type="checkbox" checked={internal} onChange={e=>setInternal(e.target.checked)}/> Internal note (not visible to requestor)</label>}<button disabled={busy||!comment.trim()} className="secondary" onClick={()=>void commentOnRequest()}>Post comment</button></section>
           <section className="panel"><h3>Request history</h3>{events.map(e=><div key={e.id} className="event"><span>{friendlyStatus(e.event)}</span><small>{fmt(e.created_at)}</small>{e.detail&&<p>{e.detail}</p>}</div>)}<h4>Linked emails</h4>{links.length?links.map((l,i)=><p className="muted" key={i}>{l.subject}</p>):<p className="muted">No emails linked yet.</p>}</section>
         </section>:
+      page==='notifications'?
+        <NotificationsPanel items={notifications} busy={busy} onOpen={openNotification} onMarkRead={n=>void markNotificationRead(n)}/>:
         <section>
           <div className="titleline"><div><h2>{page==='approvals'?'Pending approvals':page==='all'?'All requests':'My requests'}</h2><p className="muted">{visible.length} request(s) visible</p></div><button className="primary compact" onClick={()=>startForm()}><Plus size={16}/> New</button></div>
           {page==='approvals'&&pending.length===0&&<p className="empty">No requests awaiting your approval.</p>}
+          <div className="request-filters">
+            <label className="search-field"><Search size={15}/><input aria-label="Search community service requests" placeholder="Search title, reference or location" value={search} onChange={e=>setSearch(e.target.value)}/></label>
+            <select aria-label="Filter request status" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
+              <option value="all">All statuses</option>{['draft','pending','changes_requested','approved','rejected','scheduled','in_progress','completed','cancelled'].map(x=><option key={x} value={x}>{friendlyStatus(x)}</option>)}
+            </select>
+            {isAdmin&&page==='all'&&<button className="secondary compact" onClick={exportVisibleCsv}><Download size={14}/> Export visible CSV</button>}
+          </div>
           <div className="request-list">{visible.map(r=><button className="request-card" key={r.id} onClick={()=>{setSelectedId(r.id);setReviewer(r.approver_id||'');setResourceState(r.resource_status);setResourceNote(r.resource_notes);}}>
             <div><strong>{r.title}</strong><small>{r.reference} · {fmt(r.created_at)}</small></div><span className={'status status-'+r.status}>{friendlyStatus(r.status)}</span>
           </button>)}</div>

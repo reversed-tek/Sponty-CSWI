@@ -11,6 +11,14 @@ Outlook add-in for community service requests, approvals, document exchange, equ
 - **Outlook:** Create request from open email, detect CSR reference, link email to request, import email attachments, draft replies and calendar appointments, pin task pane.
 - **Reminders:** Secure server-side notification queue and daily scheduled email delivery (optional Resend configuration).
 
+## PR #2: Outlook compose and request updates
+
+The same Outlook add-in now appears on both **message read** and **message compose** ribbons. In a draft, users can search authorized requests, insert a CSR reference into the subject, and insert a plain-text request summary at the cursor. No emails are sent automatically.
+
+In-app notification inbox, read receipts, new-comment notifications, request search/status filters and admin CSV export are included. A linked message can be recognized by its stored Outlook message ID even if its subject does not contain a CSR reference.
+
+**Upgrade note:** Apply `supabase/migrations/202610140003_notifications.sql` before deploying PR #2. Generate a new manifest and **replace/redeploy** the old Outlook add-in registration. Version 1.1.0.0 requests `ReadWriteItem` (to edit the **current draft only**) rather than `ReadItem`; this is not blanket mailbox or Graph access. Some tenant deployments may prompt administrators to approve the new permission.
+
 ## Setup
 See [Deployment guide](docs/DEPLOYMENT.md) and [Security review](docs/SECURITY.md).
 

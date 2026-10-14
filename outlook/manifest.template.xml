@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xsi:type="MailApp">
   <Id>01299fcb-58f9-4cbb-9c90-967ebf365c2a</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.1.0.0</Version>
   <ProviderName>Sponty CSWI</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Sponty CSWI"/>
@@ -16,7 +16,7 @@
     <SourceLocation DefaultValue="https://YOUR-DEPLOYED-ORIGIN.invalid/"/>
     <RequestedHeight>450</RequestedHeight>
   </DesktopSettings></Form></FormSettings>
-  <Permissions>ReadItem</Permissions>
+  <Permissions>ReadWriteItem</Permissions>
   <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
   <DisableEntityHighlighting>false</DisableEntityHighlighting>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
@@ -29,6 +29,18 @@
           <Control xsi:type="Button" id="cswi.button">
             <Label resid="Button.Label"/>
             <Supertip><Title resid="Button.Label"/><Description resid="Button.Tooltip"/></Supertip>
+            <Icon><bt:Image size="16" resid="Icon.16"/><bt:Image size="32" resid="Icon.32"/><bt:Image size="80" resid="Icon.80"/></Icon>
+            <Action xsi:type="ShowTaskpane"><SourceLocation resid="Taskpane.Url"/></Action>
+          </Control>
+        </Group></OfficeTab>
+      </ExtensionPoint>
+    
+      <ExtensionPoint xsi:type="MessageComposeCommandSurface">
+        <OfficeTab id="TabDefault"><Group id="cswi.compose.group">
+          <Label resid="Group.Label"/>
+          <Control xsi:type="Button" id="cswi.compose.button">
+            <Label resid="Compose.Button.Label"/>
+            <Supertip><Title resid="Compose.Button.Label"/><Description resid="Compose.Button.Tooltip"/></Supertip>
             <Icon><bt:Image size="16" resid="Icon.16"/><bt:Image size="32" resid="Icon.32"/><bt:Image size="80" resid="Icon.80"/></Icon>
             <Action xsi:type="ShowTaskpane"><SourceLocation resid="Taskpane.Url"/></Action>
           </Control>
@@ -48,8 +60,10 @@
       <bt:ShortStrings>
         <bt:String id="Group.Label" DefaultValue="Community Service"/>
         <bt:String id="Button.Label" DefaultValue="Sponty CSWI"/>
+        <bt:String id="Compose.Button.Label" DefaultValue="Add CSWI Reference"/>
       </bt:ShortStrings>
-      <bt:LongStrings><bt:String id="Button.Tooltip" DefaultValue="Open the Community Service request management panel"/></bt:LongStrings>
+      <bt:LongStrings><bt:String id="Button.Tooltip" DefaultValue="Open the Community Service request management panel"/>
+        <bt:String id="Compose.Button.Tooltip" DefaultValue="Insert a community service request reference into this Outlook draft"/></bt:LongStrings>
     </Resources>
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
       <Requirements><bt:Sets DefaultMinVersion="1.8"><bt:Set Name="Mailbox"/></bt:Sets></Requirements>
@@ -66,7 +80,19 @@
             </Control>
           </Group>
         </OfficeTab></ExtensionPoint>
-      </DesktopFormFactor></Host></Hosts>
+      
+      <ExtensionPoint xsi:type="MessageComposeCommandSurface">
+        <OfficeTab id="TabDefault"><Group id="cswi.compose.group">
+          <Label resid="Group.Label"/>
+          <Control xsi:type="Button" id="cswi.compose.button">
+            <Label resid="Compose.Button.Label"/>
+            <Supertip><Title resid="Compose.Button.Label"/><Description resid="Compose.Button.Tooltip"/></Supertip>
+            <Icon><bt:Image size="16" resid="Icon.16"/><bt:Image size="32" resid="Icon.32"/><bt:Image size="80" resid="Icon.80"/></Icon>
+            <Action xsi:type="ShowTaskpane"><SourceLocation resid="Taskpane.Url"/></Action>
+          </Control>
+        </Group></OfficeTab>
+      </ExtensionPoint>
+    </DesktopFormFactor></Host></Hosts>
       <Resources>
         <bt:Images>
           <bt:Image id="Icon.16" DefaultValue="https://YOUR-DEPLOYED-ORIGIN.invalid/icons/icon-16.png"/>
@@ -80,8 +106,10 @@
         <bt:ShortStrings>
           <bt:String id="Group.Label" DefaultValue="Community Service"/>
           <bt:String id="Button.Label" DefaultValue="Sponty CSWI"/>
+        <bt:String id="Compose.Button.Label" DefaultValue="Add CSWI Reference"/>
         </bt:ShortStrings>
-        <bt:LongStrings><bt:String id="Button.Tooltip" DefaultValue="Open the Community Service request management panel"/></bt:LongStrings>
+        <bt:LongStrings><bt:String id="Button.Tooltip" DefaultValue="Open the Community Service request management panel"/>
+        <bt:String id="Compose.Button.Tooltip" DefaultValue="Insert a community service request reference into this Outlook draft"/></bt:LongStrings>
       </Resources>
     </VersionOverrides>
   </VersionOverrides>
