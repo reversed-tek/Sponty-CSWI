@@ -110,7 +110,7 @@ export async function oauthDialog(target: string, onTokens: (access: string, ref
           }
         });
         dialog.addEventHandler(Office.EventType.DialogEventReceived, event => {
-          fail(new Error('Outlook sign-in dialog closed or lost its connection (' + String(event.error) + '). Please try again.'));
+          fail(new Error('Outlook sign-in dialog closed or lost its connection (' + String('error' in event ? event.error : 'unknown') + '). Please try again.'));
         });
       });
     } catch (error) {
