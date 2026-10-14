@@ -19,16 +19,26 @@ async function boot() {
   if (location.pathname === '/auth/callback') {
     const { data, error } = await supabase.auth.getSession();
     if (error || !data.session) {root.render(<p className="notice">Sign-in failed. Close this window and try again.</p>);return;}
-    if (typeof Office !== 'undefined') {
+    if (typeof Office !== 'undefined' && typeof Office.onReady === 'function') {
       try {
         await Office.onReady();
-        Office.context.ui.messageParent(JSON.stringify({
-          type: 'cswi-login', access_token: data.session.access_token, refresh_token: data.session.refresh_token
-        }));
-        root.render(<p className="notice">Signed in. You can close this window.</p>);
+        if (typeof Office.context?.ui?.messageParent === 'function') {
+          // The Office dialog has a separate session store: explicitly return the
+          // Supabase session to the Outlook task pane on the same HTTPS origin.
+          Office.context.ui.messageParent(JSON.stringify({
+            type: 'cswi-login', access_token: data.session.access_token, refresh_token: data.session.refresh_token
+          }));
+          root.render(<p className="notice">Signed in. Returning to Outlook…</p>);
+          return;
+        }
+      } catch {
+        // Never silently replace a failed Office-dialog callback with the full
+        // portal; the task pane would stay signed out with no indication why.
+        root.render(<p className="notice">Microsoft sign-in succeeded, but Outlook could not receive the session. Close this window and retry from the Sponty CSWI task pane.</p>);
         return;
-      } catch { /* Browser fallback below. */ }
+      }
     }
+    // Only standalone browser sign-ins should go to the web portal.
     location.replace('/');
     return;
   }

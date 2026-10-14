@@ -47,27 +47,75 @@ export function calendarDraft(subject: string, start: string, end: string, locat
     subject, start: new Date(start), end: new Date(end), location, body: description.slice(0,32000)
   });
 }
-export function oauthDialog(target: string, onTokens: (access: string, refresh: string) => Promise<void>): Promise<void> {
-  return new Promise((resolve,reject) => {
-    if (typeof Office === 'undefined' || !Office.context?.ui?.displayDialogAsync) {
-      window.location.assign(target); resolve(); return;
-    }
-    const url = window.location.origin + '/auth/start?target=' + encodeURIComponent(target);
-    Office.context.ui.displayDialogAsync(url,{height:65,width:45},result => {
-      if(result.status !== Office.AsyncResultStatus.Succeeded) {reject(new Error(result.error?.message || 'Unable to open login dialog'));return;}
-      const dialog=result.value; let done=false;
-      dialog.addEventHandler(Office.EventType.DialogMessageReceived, async message => {
-        try {
-          if (!('message' in message)) throw new Error('Outlook did not return a login message');
-          if (message.origin && message.origin !== window.location.origin) throw new Error('Unexpected sign-in origin');
-          const parsed=JSON.parse(message.message);
-          if(parsed.type!=='cswi-login' || !parsed.access_token || !parsed.refresh_token) throw new Error('Invalid sign-in response');
-          await onTokens(parsed.access_token,parsed.refresh_token);
-          done=true; dialog.close(); resolve();
-        } catch(e) {dialog.close(); reject(e);}
+export async function oauthDialog(target: string, onTokens: (access: string, refresh: string) => Promise<void>): Promise<void> {
+  // Office.js also loads in a regular browser. Wait for the host to initialize before
+  // deciding whether this is an Outlook task pane or the standalone CSWI portal.
+  if (typeof Office === 'undefined' || typeof Office.onReady !== 'function') {
+    window.location.assign(target);
+    return;
+  }
+  const info = await Office.onReady();
+  const inOutlookHost = info?.host === Office.HostType.Outlook || Boolean(Office.context?.mailbox);
+  if (!inOutlookHost) {
+    // Preserve the normal browser-portal OAuth redirect.
+    window.location.assign(target);
+    return;
+  }
+  // Never navigate an Outlook task pane to an identity provider. A browser
+  // redirect signs in a DIFFERENT webview and strands the task pane signed out.
+  const ui = Office.context?.ui;
+  if (typeof ui?.displayDialogAsync !== 'function') {
+    throw new Error('Outlook could not initialize its sign-in dialog. Reopen this add-in in an email and try again.');
+  }
+  const startUrl = window.location.origin + '/auth/start?target=' + encodeURIComponent(target);
+  await new Promise<void>((resolve, reject) => {
+    try {
+      ui.displayDialogAsync(startUrl, { height: 65, width: 45, displayInIframe: false }, result => {
+        if (result.status !== Office.AsyncResultStatus.Succeeded) {
+          reject(new Error(result.error?.message || 'Outlook could not open the sign-in dialog'));
+          return;
+        }
+        const dialog = result.value;
+        let settled = false;
+        const fail = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          dialog.close();
+          reject(error);
+        };
+        dialog.addEventHandler(Office.EventType.DialogMessageReceived, async message => {
+          if (settled) return;
+          try {
+            if (!('message' in message)) throw new Error('Outlook did not return a sign-in message');
+            // Dialog communication is restricted to our HTTPS app origin.
+            if (message.origin && message.origin !== window.location.origin) throw new Error('Unexpected sign-in origin');
+            const parsed: unknown = JSON.parse(message.message);
+            if (!parsed || typeof parsed !== 'object') throw new Error('Invalid sign-in response');
+            const payload = parsed as Record<string, unknown>;
+            if (payload.type !== 'cswi-login' || typeof payload.access_token !== 'string' ||
+                typeof payload.refresh_token !== 'string' || !payload.access_token || !payload.refresh_token) {
+              throw new Error('Invalid sign-in response');
+            }
+            settled = true;
+            try {
+              await onTokens(payload.access_token, payload.refresh_token);
+              dialog.close();
+              resolve();
+            } catch (error) {
+              dialog.close();
+              reject(error);
+            }
+          } catch (error) {
+            fail(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+        dialog.addEventHandler(Office.EventType.DialogEventReceived, event => {
+          fail(new Error('Outlook sign-in dialog closed or lost its connection (' + String('error' in event ? event.error : 'unknown') + '). Please try again.'));
+        });
       });
-      dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {if(!done) reject(new Error('Login dialog was closed before authentication finished'));});
-    });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
