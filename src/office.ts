@@ -58,6 +58,8 @@ export function oauthDialog(target: string, onTokens: (access: string, refresh: 
       const dialog=result.value; let done=false;
       dialog.addEventHandler(Office.EventType.DialogMessageReceived, async message => {
         try {
+          if (!('message' in message)) throw new Error('Outlook did not return a login message');
+          if (message.origin && message.origin !== window.location.origin) throw new Error('Unexpected sign-in origin');
           const parsed=JSON.parse(message.message);
           if(parsed.type!=='cswi-login' || !parsed.access_token || !parsed.refresh_token) throw new Error('Invalid sign-in response');
           await onTokens(parsed.access_token,parsed.refresh_token);
