@@ -25,3 +25,12 @@ See [Deployment guide](docs/DEPLOYMENT.md) and [Security review](docs/SECURITY.m
 Install Node 22, run npm install, copy .env.example to .env.local, and use npm run dev for local browser UI preview. Outlook testing requires a deployed HTTPS URL, Microsoft 365 mailboxes and Supabase configuration.
 
 **Status:** Test-tenant implementation. Build, manifest validation, negative access-control tests and Outlook end-to-end tests are required before production use.
+
+## PR #4: core hardening (apply after PR #2)
+
+- Run `supabase/migrations/202610140004_core_hardening.sql` in Supabase SQL Editor **after** migration 003. It preserves existing requests and documents. Prior uploads are classified as *supporting*, not completion evidence.
+- Completion now requires a document explicitly uploaded through **Upload completion evidence** while the request is **In progress**. A Postgres trigger confirms the corresponding file exists in the private Storage bucket. Supporting documents alone are not enough.
+- Admins and approvers cannot decide their own requests; admins cannot assign a request back to its creator. Admins (other than the actor) receive notifications on approval or cancellation. CSV export neutralizes spreadsheet formula prefixes.
+- The optional Resend cron claims up to 100 notifications per invocation with up to four workers and one bulk recipient lookup. The deployed schedule remains **daily**, so large queues may span multiple runs; switching to more frequent delivery requires confirming your Vercel plan and provider quotas.
+- Database regression coverage: `supabase/tests/core_hardening.sql` (pgTAP). With Supabase CLI and Docker: `supabase start`, then `supabase test db`. These tests need a local Supabase database; the existing CI build does **not** run them.
+- Only the SQL migration and web code need updating; **no Outlook manifest replacement** is required.

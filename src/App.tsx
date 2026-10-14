@@ -219,7 +219,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     if(!selected)return;
     await execute(async()=>{const {error:e}=await supabase.rpc('coordinate_resources',{rid:selected.id,state:resourceState,detail:resourceNote});if(e)throw e;},'Resource coordination updated');
   }
-  async function uploadFiles(files: FileList | File[]){
+  async function uploadFiles(files: FileList | File[], evidenceKind: 'supporting' | 'completion' = 'supporting'){
     if(!selected||!user)return;
     await execute(async()=>{
       for(const file of Array.from(files)){
@@ -229,7 +229,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
         const {error:up}=await supabase.storage.from('cswi-documents').upload(path,file,{contentType:mimeFor(file.name),upsert:false});
         if(up)throw up;
         const {error:dbError}=await supabase.from('documents').insert({
-          request_id:selected.id,uploaded_by:user.id,storage_path:path,file_name:file.name,mime_type:mimeFor(file.name),byte_size:file.size
+          request_id:selected.id,uploaded_by:user.id,storage_path:path,file_name:file.name,mime_type:mimeFor(file.name),byte_size:file.size,evidence_kind:evidenceKind
         });
         if(dbError)throw new Error('File uploaded but metadata registration failed; contact an admin. '+dbError.message);
       }
@@ -310,14 +310,14 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   }
   function exportVisibleCsv(){
     const columns=['reference','title','status','location','starts_at','ends_at','participant_count','bus_required','equipment','created_at'] as const;
-    const cell=(value:unknown)=>'"'+String(value??'').replaceAll('"','""')+'"';
+    const cell=(value:unknown)=>{const raw=String(value??''); const safe=/^[\s\u0000-\u001f]*[=+\-@]/u.test(raw)?"'"+raw:raw; return '"'+safe.replaceAll('"','""')+'"';};
     const csv=[columns.join(','),...visible.map(r=>columns.map(c=>cell(r[c])).join(','))].join('\r\n');
     const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
     const link=document.createElement('a');
     link.href=url;link.download='cswi-requests.csv';document.body.appendChild(link);link.click();link.remove();
     URL.revokeObjectURL(url);
   }
-  const hasReviewer=selected && (selected.approver_id===user.id||isAdmin);
+  const hasReviewer=selected && selected.created_by!==user.id && (selected.approver_id===user.id||isAdmin);
   return <div className="shell">
     <header className="header"><div className="brand"><div className="brand-mark"><ShieldCheck size={19}/></div><div><strong>Sponty CSWI</strong><small>Community Service</small></div></div><button className="icon-btn" title="Refresh" onClick={()=>void execute(refresh,'Updated')}><RefreshCw size={17}/></button></header>
     <nav className="nav">
@@ -358,17 +358,17 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
           {selected.created_by===user.id&&['draft','changes_requested'].includes(selected.status)&&<button className="secondary full" disabled={busy} onClick={()=>void move('submit')}>Submit for approval</button>}
           {selected.created_by===user.id&&['draft','pending','changes_requested','approved'].includes(selected.status)&&<button className="danger-ghost full" disabled={busy} onClick={()=>void move('cancel')}>Cancel request</button>}
           {selected.status==='pending'&&hasReviewer&&<section className="panel"><h3>Approval decision</h3><label>Reason (required for rejection or changes)<textarea rows={2} maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label><div className="actions"><button disabled={busy} className="primary" onClick={()=>void move('approve')}><Check size={15}/> Approve</button><button disabled={busy||reason.trim().length<3} className="secondary" onClick={()=>void move('changes')}>Request changes</button><button disabled={busy||reason.trim().length<3} className="danger-ghost" onClick={()=>void move('reject')}>Reject</button></div></section>}
-          {isAdmin&&<section className="panel"><h3>Admin coordination</h3>{['draft','pending','changes_requested'].includes(selected.status)&&<><label>Assign approver<select value={reviewer} onChange={e=>setReviewer(e.target.value)}><option value="">Choose reviewer</option>{people.filter(p=>userRoles.some(r=>r.user_id===p.id&&(r.role==='approver'||r.role==='admin'))).map(p=><option key={p.id} value={p.id}>{p.display_name||p.email} ({p.email})</option>)}</select></label><button className="secondary" disabled={busy||!reviewer} onClick={()=>void assign()}>Assign reviewer</button></>}
+          {isAdmin&&<section className="panel"><h3>Admin coordination</h3>{['draft','pending','changes_requested'].includes(selected.status)&&<><label>Assign approver<select value={reviewer} onChange={e=>setReviewer(e.target.value)}><option value="">Choose reviewer</option>{people.filter(p=>p.id!==selected.created_by&&userRoles.some(r=>r.user_id===p.id&&(r.role==='approver'||r.role==='admin'))).map(p=><option key={p.id} value={p.id}>{p.display_name||p.email} ({p.email})</option>)}</select></label><button className="secondary" disabled={busy||!reviewer} onClick={()=>void assign()}>Assign reviewer</button></>}
             <label>Equipment / transport status<select value={resourceState} onChange={e=>setResourceState(e.target.value)}><option value="pending">Pending</option><option value="arranged">Arranged</option><option value="not_required">Not required</option></select></label>
             <label>Coordination notes<textarea rows={2} value={resourceNote} onChange={e=>setResourceNote(e.target.value)}/></label><button className="secondary" disabled={busy} onClick={()=>void coordinate()}>Save coordination</button>
             {selected.status==='approved'&&<button className="primary full" onClick={()=>void move('schedule')}>Mark scheduled</button>}
             {selected.status==='scheduled'&&<button className="primary full" onClick={()=>void move('start')}>Mark in progress</button>}
-            {selected.status==='in_progress'&&<button className="primary full" onClick={()=>void move('complete')}>Mark completed</button>}
+            {selected.status==='in_progress'&&<><button className="primary full" disabled={!documents.some(d=>d.evidence_kind==='completion')} onClick={()=>void move('complete')}>Mark completed</button>{!documents.some(d=>d.evidence_kind==='completion')&&<small>Upload completion evidence below before marking this activity completed.</small>}</>}
             {!['completed','rejected','cancelled'].includes(selected.status)&&<><label>Administrative cancellation reason<textarea rows={2} value={reason} onChange={e=>setReason(e.target.value)}/></label><button className="danger-ghost" disabled={busy||reason.trim().length<3} onClick={()=>void move('admin_cancel')}>Admin cancel</button></>}
           </section>}
           {['approved','scheduled','in_progress','completed'].includes(selected.status)&&selected.starts_at&&selected.ends_at&&<button className="secondary full" onClick={()=>{try{calendarDraft(selected.title+' ('+selected.reference+')',selected.starts_at!,selected.ends_at!,selected.location,selected.description);}catch(e){setError(errorText(e));}}}><CalendarPlus size={16}/> Draft Outlook calendar event</button>}
           {mail&&<section className="panel"><h3>Current email actions</h3><div className="actions"><button className="secondary" disabled={!mail.id||busy} onClick={()=>void linkEmail()}><Link2 size={15}/> Link email</button><button className="secondary" onClick={()=>replyWith('status')}><Mail size={15}/> Draft reply</button><button className="secondary" onClick={()=>replyWith('document')}><Mail size={15}/> Request documents reply</button></div>{mail.attachments.length>0&&<><h4>Import from email</h4>{mail.attachments.map(x=><div key={x.id} className="row-item"><span className="ellipsis">{x.name}</span><button disabled={busy} onClick={()=>void (async()=>{try{const file=await readAttachment(x.id,x.name);await uploadFiles([file]);}catch(e){setError(errorText(e));}})()}>Import</button></div>)}</>}</section>}
-          <section className="panel"><h3><Paperclip size={16}/> Documents</h3><label className="upload"><Upload size={15}/> Upload files<input aria-label="Upload supporting documents" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx" disabled={busy} onChange={e=>{if(e.target.files?.length)void uploadFiles(e.target.files);e.target.value='';}}/></label><small>Private files · 10 MB each · PDF, images, Office files, text</small>{uploaded&&<small>Most recent upload recorded.</small>}{documents.map(d=><div key={d.id} className="row-item"><span className="ellipsis">{d.file_name}</span><button onClick={()=>void download(d)}>Open</button></div>)}
+          <section className="panel"><h3><Paperclip size={16}/> Documents</h3><label className="upload"><Upload size={15}/> Upload files<input aria-label="Upload supporting documents" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx" disabled={busy} onChange={e=>{if(e.target.files?.length)void uploadFiles(e.target.files);e.target.value='';}}/></label><small>Private files · 10 MB each · PDF, images, Office files, text</small>{selected.status==='in_progress'&&(selected.created_by===user.id||isAdmin)&&<label className="upload"><Upload size={15}/> Upload completion evidence<input aria-label="Upload completion evidence" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx" disabled={busy} onChange={e=>{if(e.target.files?.length)void uploadFiles(e.target.files,'completion');e.target.value='';}}/></label>}{uploaded&&<small>Most recent upload recorded.</small>}{documents.map(d=><div key={d.id} className="row-item"><span className="ellipsis">{d.evidence_kind==='completion'?'[Completion evidence] ':''}{d.file_name}</span><button onClick={()=>void download(d)}>Open</button></div>)}
             {docRequests.filter(d=>!d.resolved_at).map(d=><div className="request-note" key={d.id}><strong>Document requested:</strong> {d.prompt}{hasReviewer&&<button className="text-btn" onClick={()=>void execute(async()=>{const {error:e}=await supabase.rpc('resolve_document_request',{doc_id:d.id});if(e)throw e;},'Marked received')}>Mark received</button>}</div>)}
             {hasReviewer&&<><label>Request additional document<textarea rows={2} value={requestedDocument} onChange={e=>setRequestedDocument(e.target.value)}/></label><button className="secondary" disabled={busy||!requestedDocument.trim()} onClick={()=>void requestMoreDocuments()}><FilePlus2 size={15}/> Send document request</button></>}
           </section>
