@@ -8,13 +8,13 @@ create or replace function public.mark_notification_read(nid bigint)
 returns boolean
 language plpgsql security definer set search_path = ''
 as $$
-declare changed boolean;
+declare changed integer;
 begin
   update public.notifications
      set read_at = coalesce(read_at, now())
    where id = nid and user_id = auth.uid();
   get diagnostics changed = row_count;
-  return changed;
+  return changed > 0;
 end $$;
 revoke all on function public.mark_notification_read(bigint) from public, anon;
 grant execute on function public.mark_notification_read(bigint) to authenticated;
