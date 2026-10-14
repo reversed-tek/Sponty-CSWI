@@ -7,7 +7,7 @@ const current = () => typeof Office !== 'undefined' ? Office.context?.mailbox?.i
 export const inOutlook = () => Boolean(current());
 export async function readMail(): Promise<Mail | null> {
   const item = current() as Office.MessageRead | undefined;
-  if (!item || !('subject' in item)) return null;
+  if (!item || typeof item.subject !== 'string') return null;
   const preview = await new Promise<string>(resolve => {
     try { item.body.getAsync(Office.CoercionType.Text, result => resolve(result.status === Office.AsyncResultStatus.Succeeded ? String(result.value).slice(0, 2000) : '')); }
     catch { resolve(''); }
@@ -67,6 +67,56 @@ export function oauthDialog(target: string, onTokens: (access: string, refresh: 
         } catch(e) {dialog.close(); reject(e);}
       });
       dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {if(!done) reject(new Error('Login dialog was closed before authentication finished'));});
+    });
+  });
+}
+
+/** Outlook's selected item is either a read item or an active compose draft. */
+export type OutlookSurface = 'read' | 'compose' | 'none';
+export function outlookSurface(): OutlookSurface {
+  const item = current();
+  if (!item) return 'none';
+  if (typeof (item as Office.MessageRead).subject === 'string') return 'read';
+  const draft = item as Office.MessageCompose;
+  return typeof draft.subject?.getAsync === 'function' ? 'compose' : 'none';
+}
+function requireCompose(): Office.MessageCompose {
+  if (outlookSurface() !== 'compose') throw new Error('Open an Outlook message draft to use compose actions.');
+  return current() as Office.MessageCompose;
+}
+export function composeSubject(): Promise<string> {
+  const item = requireCompose();
+  return new Promise((resolve, reject) =>
+    item.subject.getAsync(result => result.status === Office.AsyncResultStatus.Succeeded
+      ? resolve(result.value || '')
+      : reject(new Error(result.error?.message || 'Could not read Outlook draft subject')))
+  );
+}
+export function setComposeSubject(subject: string): Promise<void> {
+  if (subject.length > 255) throw new Error('Outlook subjects must be 255 characters or less.');
+  const item = requireCompose();
+  return new Promise((resolve, reject) =>
+    item.subject.setAsync(subject, result => result.status === Office.AsyncResultStatus.Succeeded
+      ? resolve()
+      : reject(new Error(result.error?.message || 'Could not update Outlook draft subject')))
+  );
+}
+export function insertComposeBody(text: string): Promise<void> {
+  const item = requireCompose();
+  return new Promise((resolve, reject) => {
+    item.body.getTypeAsync(format => {
+      if (format.status !== Office.AsyncResultStatus.Succeeded) {
+        reject(new Error(format.error?.message || 'Could not read draft body format'));
+        return;
+      }
+      const isHtml = format.value === Office.CoercionType.Html;
+      const content = isHtml
+        ? '<p>' + text.split('\n').map(line => line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')).join('<br>') + '</p>'
+        : text;
+      item.body.setSelectedDataAsync(content, { coercionType: format.value }, result =>
+        result.status === Office.AsyncResultStatus.Succeeded
+          ? resolve()
+          : reject(new Error(result.error?.message || 'Could not insert request summary')));
     });
   });
 }
