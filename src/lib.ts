@@ -18,7 +18,7 @@ export type Request = {
   transport_notes: string; notes: string; status: Status; resource_status: string;
   resource_notes: string; created_at: string;
 };
-export type Document = { id:string; request_id:string; file_name:string; storage_path:string; mime_type:string; created_at:string };
+export type Document = { id:string; request_id:string; file_name:string; storage_path:string; mime_type:string; evidence_kind:'supporting'|'completion'; created_at:string };
 export type Event = { id:number; request_id:string; actor_id:string; event:string; detail:string; created_at:string };
 export type Comment = { id:string; request_id:string; author_id:string; body:string; internal:boolean; created_at:string };
 export type DocumentRequest = { id:string; request_id:string; prompt:string; resolved_at:string | null; created_at:string };
