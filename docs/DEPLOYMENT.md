@@ -85,7 +85,8 @@ The initial command is a **Message Read** add-in and generally requires a select
 9. Repeat supported scenarios in Outlook web and new Outlook on Windows.
 
 ## 7. Troubleshooting
-- **Login dialog does not work:** Entra callback points to Supabase; check Vercel /auth/callback is allowlisted and Office Dialog opens on the same origin as the task pane.
+- **Outlook Classic opens a browser portal on sign-in:** Opening the authentication dialog is expected, but the *Outlook task pane* must receive the signed-in session afterward. The add-in waits for Office.js initialization and uses the Office Dialog API; if the API fails, it now shows an error rather than navigating the task pane to the identity provider. Make sure you are testing a deployed version containing this fix. A source-only authentication change requires a Vercel redeploy, **not** a new manifest.
+- **Login dialog does not work:** Entra callback points to Supabase; check Vercel /auth/callback is allowlisted and Office Dialog opens on the same origin as the task pane. If Outlook reports a dialog communication error, record the error code and which Outlook client/version you're using. Verify that the OAuth callback URL is the same stable HTTPS origin as the manifest's task pane URL.
 - **No approvers:** Ensure users sign in at least once, grant Approver role and assign a reviewer to the request.
 - **Uploads fail:** Only PDF, PNG, JPG, TXT, DOCX, XLSX ≤10 MB; request must not be closed.
 - **Icons missing:** Confirm generated PNG URLs return HTTP 200 on Vercel and manifest URLs contain your actual domain.
