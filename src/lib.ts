@@ -22,4 +22,5 @@ export type Document = { id:string; request_id:string; file_name:string; storage
 export type Event = { id:number; request_id:string; actor_id:string; event:string; detail:string; created_at:string };
 export type Comment = { id:string; request_id:string; author_id:string; body:string; internal:boolean; created_at:string };
 export type DocumentRequest = { id:string; request_id:string; prompt:string; resolved_at:string | null; created_at:string };
+export type AppNotification = { id:number; request_id:string|null; subject:string; body:string; created_at:string; read_at:string|null };
 export const errorText = (e: unknown) => e instanceof Error ? e.message : String(e);
