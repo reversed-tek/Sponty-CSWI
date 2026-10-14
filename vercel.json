@@ -1,0 +1,1 @@
+{"rewrites":[{"source":"/auth/:path*","destination":"/index.html"}],"crons":[{"path":"/api/cron/notifications","schedule":"0 0 * * *"}]}
