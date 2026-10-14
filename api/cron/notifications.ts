@@ -10,6 +10,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !RESEND_API_KEY || !NOTIFICATION_FROM)
     return res.status(503).json({ error:'Server-side email settings are incomplete' });
   const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth:{persistSession:false, autoRefreshToken:false} });
+  const { error: reminderError } = await db.rpc('queue_daily_reminders');
+  if (reminderError) return res.status(500).json({ error: reminderError.message });
   const { data, error } = await db.rpc('claim_notifications', { n: 25 });
   if (error) return res.status(500).json({ error:error.message });
   let sent=0, failed=0;
