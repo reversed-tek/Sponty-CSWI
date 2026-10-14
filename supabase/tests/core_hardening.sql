@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(11);
+select plan(12);
 
 -- Isolated fixture identities, generated through the real auth.users trigger.
 insert into auth.users (instance_id,id,aud,role,email,encrypted_password,email_confirmed_at)
@@ -31,12 +31,12 @@ select has_column('public','documents','evidence_kind','Completion evidence clas
 
 -- Real authenticated role + mocked JWT sub are essential for meaningful RLS tests.
 set local role authenticated;
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000444',true);
+do $jwt$ begin perform set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000444',true); end $jwt$;
 select is((select count(*) from public.service_requests),4::bigint,'Admin may read authorized request list');
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000222',true);
+do $jwt$ begin perform set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000222',true); end $jwt$;
 select is((select count(*) from public.service_requests),2::bigint,'Reviewer can see only their assignments');
 
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000111',true);
+do $jwt$ begin perform set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000111',true); end $jwt$;
 select throws_ok(
   $$select public.transition_request('00000000-0000-4000-8000-0000000000a1','approve','')$$,
   'P0001','You cannot review your own request','Admin cannot approve own legacy-assigned request');
@@ -44,11 +44,11 @@ select throws_ok(
   $$select public.assign_approver('00000000-0000-4000-8000-0000000000a1','00000000-0000-4000-8000-000000000111')$$,
   'P0001','A requestor cannot be their own approver','Admin cannot assign requester as reviewer');
 
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000222',true);
+do $jwt$ begin perform set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000222',true); end $jwt$;
 select lives_ok(
   $$select public.transition_request('00000000-0000-4000-8000-0000000000b2','approve','')$$,
   'Independent reviewer can approve');
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000111',true);
+do $jwt$ begin perform set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000111',true); end $jwt$;
 select ok(exists (
   select 1 from public.notifications where request_id='00000000-0000-4000-8000-0000000000b2'
   and user_id='00000000-0000-4000-8000-000000000111'
@@ -74,17 +74,17 @@ values ('00000000-0000-4000-8000-0000000000c3','00000000-0000-4000-8000-00000000
 'completion.pdf','application/pdf',128,'completion');
 
 set local role authenticated;
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000111',true);
+do $jwt$ begin perform set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000111',true); end $jwt$;
 select lives_ok(
   $$select public.transition_request('00000000-0000-4000-8000-0000000000c3','complete','')$$,
   'Completion works with registered evidence');
 
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000333',true);
+do $jwt$ begin perform set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000333',true); end $jwt$;
 select lives_ok(
   $$select public.transition_request('00000000-0000-4000-8000-0000000000d4','cancel','')$$,
   'Owner can cancel their own draft');
 
-select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000111',true);
+do $jwt$ begin perform set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000111',true); end $jwt$;
 select ok(exists (
   select 1 from public.notifications where request_id='00000000-0000-4000-8000-0000000000d4'
   and user_id='00000000-0000-4000-8000-000000000111' and subject like 'Admin update:%cancelled'
