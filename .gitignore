@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-manifest/
+public/icons/
+.env
+.env.local
+.vercel/
+*.log

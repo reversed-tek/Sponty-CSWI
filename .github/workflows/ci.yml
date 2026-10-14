@@ -1,0 +1,17 @@
+name: Verify application
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - run: node scripts/generate-manifest.mjs https://cswi.example.com
+      - run: python3 -c "import xml.etree.ElementTree as E; E.parse('dist-manifest/manifest.xml')"
