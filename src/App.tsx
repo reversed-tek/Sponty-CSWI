@@ -57,6 +57,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   const [resourceNames,setResourceNames]=useState<string[]>([]);
   const [approvalStages,setApprovalStages]=useState<{stage:number;approver_id:string;status:string}[]>([]);
   const [analyticsEvents,setAnalyticsEvents]=useState<Event[]>([]);
+  const [usage,setUsage]=useState<{resource_id:string;name:string;kind:string;active_holds:number;reserved_hours:number}[]>([]);
   const [analyticsLoading,setAnalyticsLoading]=useState(false);
   const [documents,setDocuments]=useState<Document[]>([]);
   const [events,setEvents]=useState<Event[]>([]);
@@ -195,9 +196,16 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     if(page!=='analytics'||!isAdmin)return;
     let cancelled=false;
     setAnalyticsLoading(true);
-    void Promise.resolve(supabase.from('request_events').select('*').order('created_at',{ascending:false}).limit(5000))
-      .then(({data,error:e})=>{if(!cancelled){if(e)setError(e.message);else setAnalyticsEvents(data as Event[]||[]);}})
-      .finally(()=>{if(!cancelled)setAnalyticsLoading(false);});
+    void Promise.all([
+      Promise.resolve(supabase.from('request_events').select('*').order('created_at',{ascending:false}).limit(5000)),
+      Promise.resolve(supabase.rpc('resource_usage_summary'))
+    ]).then(([eventsResult,usageResult])=>{
+      if(cancelled)return;
+      if(eventsResult.error)setError(eventsResult.error.message);
+      else setAnalyticsEvents(eventsResult.data as Event[]||[]);
+      if(usageResult.error)setError(usageResult.error.message);
+      else setUsage(usageResult.data||[]);
+    }).finally(()=>{if(!cancelled)setAnalyticsLoading(false);});
     return ()=>{cancelled=true;};
   },[page,isAdmin]);
 
@@ -472,7 +480,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       page==='notifications'?
         <NotificationsPanel items={notifications} busy={busy} onOpen={openNotification} onMarkRead={n=>void markNotificationRead(n)} requests={requests} userId={user.id} onApprove={n=>void quickDecision(n,'approve','')} onReject={(n,why)=>void quickDecision(n,'reject',why)}/>:
       page==='operations'&&isAdmin?<section><h2>Operations setup</h2><ResourceAdmin onSaved={refresh}/><div className="panel"><h3>Registered resources</h3>{resources.map(x=><div className="row-item" key={x.id}><span>{x.name} — {x.kind}, capacity {x.capacity}</span><span>{x.active?'Active':'Inactive'}</span></div>)}</div><RoutingAdmin people={people.filter(p=>userRoles.some(x=>x.user_id===p.id&&(x.role==='approver'||x.role==='admin')))} rules={rules} delegations={delegations} onSaved={refresh}/></section>:
-      page==='analytics'&&isAdmin?<AnalyticsPanel requests={requests} events={analyticsEvents} loading={analyticsLoading}/>:
+      page==='analytics'&&isAdmin?<AnalyticsPanel requests={requests} events={analyticsEvents} usage={usage} loading={analyticsLoading}/>:
         <section>
           <div className="titleline"><div><h2>{page==='approvals'?'Pending approvals':page==='all'?'All requests':'My requests'}</h2><p className="muted">{visible.length} request(s) visible</p></div><button className="primary compact" onClick={()=>startForm()}><Plus size={16}/> New</button></div>
           {page==='approvals'&&pending.length===0&&<p className="empty">No requests awaiting your approval.</p>}
