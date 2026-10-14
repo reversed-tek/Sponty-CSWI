@@ -36,6 +36,30 @@ create table public.approval_delegations (
  ends_at timestamptz not null,
  check (ends_at>starts_at and principal_id<>delegate_id)
 );
+alter table public.approval_delegations add constraint cswi_no_overlapping_delegations
+ exclude using gist (principal_id with =, tstzrange(starts_at,ends_at,'[)') with &&);
+
+create or replace function public.validate_routing_people()
+returns trigger language plpgsql security definer set search_path = '' as $
+begin
+ if tg_table_name='approval_rules' then
+   if not exists(select 1 from public.user_roles where user_id=new.primary_approver and role in ('approver','admin')) then
+     raise exception 'Primary reviewer must have an Approver or Admin role'; end if;
+   if new.secondary_approver is not null and not exists(
+     select 1 from public.user_roles where user_id=new.secondary_approver and role in ('approver','admin')
+   ) then raise exception 'Secondary reviewer must have an Approver or Admin role'; end if;
+ else
+   if not exists(select 1 from public.user_roles where user_id=new.delegate_id and role in ('approver','admin'))
+   then raise exception 'Delegate must be a reviewer'; end if;
+ end if;
+ return new;
+end $;
+revoke all on function public.validate_routing_people() from public,anon,authenticated;
+create trigger cswi_validate_approval_rules before insert or update on public.approval_rules
+ for each row execute function public.validate_routing_people();
+create trigger cswi_validate_approval_delegations before insert or update on public.approval_delegations
+ for each row execute function public.validate_routing_people();
+
 alter table public.approval_rules enable row level security;
 alter table public.approval_stages enable row level security;
 alter table public.approval_delegations enable row level security;
