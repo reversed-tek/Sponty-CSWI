@@ -396,21 +396,52 @@ textarea { min-height: 74px; resize: vertical; }
 .unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .notification-card .actions { margin-bottom: 0; }
 
-/* Standalone sign-in and footnote */
+/* Minimal Microsoft sign-in */
 .signin, .setup {
   width: min(420px, calc(100% - 30px));
-  margin: 9vh auto;
-  padding: 28px;
+  margin: clamp(48px, 14vh, 140px) auto 0;
+  padding: 32px;
   border: 1px solid var(--border-soft);
   border-radius: 4px;
   background: #fff;
   text-align: center;
 }
-.signin .brand-mark { width: 42px; height: 42px; margin: 0 auto; }
-.signin p { color: var(--muted); line-height: 1.6; }
-.signin .primary { width: 100%; margin: 14px 0; }
-.signin small { display: block; }
-footer { margin-top: 28px; padding: 16px 0; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 11px; }
+.signin h1 {
+  margin: 0 0 26px;
+  font-size: 22px;
+  font-weight: 600;
+}
+.microsoft-signin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid #8a8886;
+  border-radius: 3px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.microsoft-signin:hover:not(:disabled) {
+  background: #f7f7f7;
+  border-color: #605e5c;
+}
+.microsoft-logo {
+  display: block;
+  flex: 0 0 19px;
+  width: 19px;
+  height: 19px;
+}
+.signin .error {
+  color: #a4262c;
+  line-height: 1.4;
+  text-align: left;
+}
+.setup p { color: var(--muted); }
 
 /* Tablet/Outlook task pane: keep all commands accessible without a squeezed sidebar. */
 @media (max-width: 760px) {
