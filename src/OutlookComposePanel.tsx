@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { FileText, MailPlus, Search } from 'lucide-react';
+import { errorText } from './lib';
 import type { Request } from './lib';
 import { composeSubject, insertComposeBody, setComposeSubject } from './office';
 
@@ -23,7 +24,7 @@ export function OutlookComposePanel({ requests, onError, onNotice }: Props) {
       await work();
       onNotice(success);
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      onError(errorText(e));
     } finally {
       setBusy(false);
     }
