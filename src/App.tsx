@@ -10,7 +10,7 @@ import type { Resource, ResourceOption } from './ResourcesPanel';
 import { RoutingAdmin } from './RoutingAdmin';
 import { AnalyticsPanel } from './AnalyticsPanel';
 import { proposeEmailFields } from './emailPrefill';
-import { calendarDraft, emailReference, inOutlook, mimeFor, oauthDialog, readAttachment, readMail, replyDraft, outlookSurface } from './office';
+import { calendarDraft, emailReference, mimeFor, oauthDialog, readAttachment, readMail, replyDraft, outlookSurface } from './office';
 import type { OutlookSurface } from './office';
 import type { Mail as SelectedMail } from './office';
 
@@ -73,7 +73,6 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   const [resourceNote,setResourceNote]=useState('');
   const [roleTarget,setRoleTarget]=useState('');
   const [roleToGrant,setRoleToGrant]=useState<Role>('approver');
-  const [uploaded,setUploaded]=useState(false);
   const user=session?.user;
   const isAdmin=roles.includes('admin');
   const canApprove=roles.includes('approver') || isAdmin;
@@ -328,7 +327,6 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
         });
         if(dbError)throw new Error('File uploaded but metadata registration failed; contact an admin. '+dbError.message);
       }
-      setUploaded(true);
     },'Document(s) uploaded');
   }
   async function download(doc:Document){
@@ -336,7 +334,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       const {data,error:e}=await supabase.storage.from('cswi-documents').createSignedUrl(doc.storage_path,60);
       if(e||!data?.signedUrl)throw e||new Error('Could not open document');
       window.open(data.signedUrl,'_blank','noopener,noreferrer');
-    },'Secure download link opened');
+    },'Document opened');
   }
   async function linkEmail(){
     if(!selected||!mail?.id||!user) return;
@@ -382,9 +380,21 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       if(e)throw e;
     },'Role removed');
   }
-  if(!configured)return <main className="setup"><h1>Sponty CSWI</h1><p>Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your Vercel project before installing the add-in.</p></main>;
+  if(!configured)return <main className="setup"><h1>Sponty CSWI</h1><p>Service unavailable.</p></main>;
   if(loading)return <main className="setup">Loading Sponty CSWI…</main>;
-  if(!user)return <main className="signin"><div className="brand-mark"><ShieldCheck size={24}/></div><h1>Sponty CSWI</h1><p>Community service requests, approvals and document coordination — directly in Outlook.</p><button className="primary" disabled={busy} onClick={()=>void login()}>Sign in with Microsoft</button><small>Access is limited to the configured Microsoft Entra tenant.</small>{error&&<p className="error" role="alert">{error}</p>}</main>;
+  if(!user)return <main className="signin">
+    <h1>Sponty CSWI</h1>
+    <button type="button" className="microsoft-signin" disabled={busy} onClick={()=>void login()}>
+      <svg className="microsoft-logo" viewBox="0 0 19 19" width="19" height="19" aria-hidden="true" focusable="false">
+        <rect x="0" y="0" width="9" height="9" fill="#f25022"/>
+        <rect x="10" y="0" width="9" height="9" fill="#7fba00"/>
+        <rect x="0" y="10" width="9" height="9" fill="#00a4ef"/>
+        <rect x="10" y="10" width="9" height="9" fill="#ffb900"/>
+      </svg>
+      <span>Sign in with Microsoft</span>
+    </button>
+    {error&&<p className="error" role="alert">{error}</p>}
+  </main>;
 
   const visibleBase=page==='approvals'?ordered.filter(r=>r.status==='pending'&&(isAdmin||r.approver_id===user.id)):page==='all'&&isAdmin?ordered:ordered.filter(r=>r.created_by===user.id);
   const visible=visibleBase.filter(r=>(statusFilter==='all'||r.status===statusFilter)&&
@@ -414,7 +424,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   }
   const hasReviewer=selected && selected.created_by!==user.id && (selected.approver_id===user.id||isAdmin);
   return <div className="shell">
-    <header className="header"><div className="brand"><div className="brand-mark"><ShieldCheck size={19}/></div><div><strong>Sponty CSWI</strong><small>Community Service</small></div></div><button className="icon-btn" title="Refresh" onClick={()=>void execute(refresh,'Updated')}><RefreshCw size={17}/></button></header>
+    <header className="header"><div className="brand"><div className="brand-mark"><ShieldCheck size={19}/></div><div><strong>Sponty CSWI</strong></div></div><button className="icon-btn" title="Refresh" onClick={()=>void execute(refresh,'Updated')}><RefreshCw size={17}/></button></header>
     <nav className="nav">
       <button className={page==='my'?'active':''} onClick={()=>{setPage('my');setSelectedId(null);}}><Inbox size={15}/> My Requests</button>
       {canApprove&&<button className={page==='approvals'?'active':''} onClick={()=>{setPage('approvals');setSelectedId(null);}}><Check size={15}/> Approvals <span className="count">{pending.length}</span></button>}
@@ -432,15 +442,15 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       {page==='new'?
         <section><button className="back" onClick={()=>{setPage('my');setSelectedId(editing?.id||null);}}><ArrowLeft size={15}/> Back</button><h2>{editing?'Edit request':'New request'}</h2>
           <form onSubmit={e=>{e.preventDefault();void saveRequest(false);}}>
-            {mail && suggestedFromEmail.length>0 && <section className="panel"><h3>Suggestions from the open email</h3><p className="muted">Review the proposed values before applying. Nothing is saved automatically.</p>{suggestedFromEmail.map(x=><p key={x.field}><strong>{x.label}:</strong> {String(x.value)}</p>)}<button type="button" className="secondary" onClick={()=>setForm(old=>({...old,...Object.fromEntries(suggestedFromEmail.map(x=>[x.field,x.value]))}))}>Apply suggested fields</button></section>}
+            {mail && suggestedFromEmail.length>0 && <section className="panel"><h3>Suggestions from the open email</h3>{suggestedFromEmail.map(x=><p key={x.field}><strong>{x.label}:</strong> {String(x.value)}</p>)}<button type="button" className="secondary" onClick={()=>setForm(old=>({...old,...Object.fromEntries(suggestedFromEmail.map(x=>[x.field,x.value]))}))}>Apply suggested fields</button></section>}
             <label>Activity title *<input required minLength={4} maxLength={180} value={form.title} onChange={e=>setField('title',e.target.value)}/></label>
             <label>Activity type<select value={form.activity_type} onChange={e=>setField('activity_type',e.target.value)}><option value="general">General</option><option value="bus_trip">Bus trip</option><option value="off_site">Off-site activity</option></select></label>
-            <label>Activity description *<textarea rows={4} value={form.description} onChange={e=>setField('description',e.target.value)} placeholder="Purpose and planned activities"/></label>
+            <label>Activity description *<textarea rows={4} value={form.description} onChange={e=>setField('description',e.target.value)}/></label>
             <label>Department / group<input value={form.department} onChange={e=>setField('department',e.target.value)}/></label>
             <label>Venue / address *<input value={form.location} onChange={e=>setField('location',e.target.value)}/></label>
             <div className="two"><label>Starts *<input type="datetime-local" value={form.starts_at} onChange={e=>setField('starts_at',e.target.value)}/></label><label>Ends *<input type="datetime-local" value={form.ends_at} onChange={e=>setField('ends_at',e.target.value)}/></label></div>
             <label>Expected participants<input type="number" min="1" max="10000" value={form.participant_count} onChange={e=>setField('participant_count',Number(e.target.value))}/></label>
-            <label>Equipment required<textarea rows={2} placeholder="Projector, chairs, tables…" value={form.equipment} onChange={e=>setField('equipment',e.target.value)}/></label>
+            <label>Equipment required<textarea rows={2} value={form.equipment} onChange={e=>setField('equipment',e.target.value)}/></label>
             <label className="checkbox"><input type="checkbox" checked={form.bus_required} onChange={e=>setField('bus_required',e.target.checked)}/> School bus needed</label>
             {form.bus_required&&<><label>Bus passenger count<input type="number" min="1" value={form.bus_passengers} onChange={e=>setField('bus_passengers',Number(e.target.value))}/></label><label>Pickup, drop-off and other transport notes<textarea rows={2} value={form.transport_notes} onChange={e=>setField('transport_notes',e.target.value)}/></label></>}
             <label>Additional notes<textarea rows={2} value={form.notes} onChange={e=>setField('notes',e.target.value)}/></label>
@@ -459,22 +469,22 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
           {selected.created_by===user.id&&['draft','changes_requested'].includes(selected.status)&&<button className="primary full" disabled={busy} onClick={()=>startForm(selected)}>Edit request</button>}
           {selected.created_by===user.id&&['draft','changes_requested'].includes(selected.status)&&<button className="secondary full" disabled={busy} onClick={()=>void move('submit')}>Submit for approval</button>}
           {selected.created_by===user.id&&['draft','pending','changes_requested','approved'].includes(selected.status)&&<button className="danger-ghost full" disabled={busy} onClick={()=>void move('cancel')}>Cancel request</button>}
-          {selected.status==='pending'&&hasReviewer&&<section className="panel"><h3>Approval decision</h3><label>Reason (required for rejection or changes)<textarea rows={2} maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label><div className="actions"><button disabled={busy} className="primary" onClick={()=>void move('approve')}><Check size={15}/> Approve</button><button disabled={busy||reason.trim().length<3} className="secondary" onClick={()=>void move('changes')}>Request changes</button><button disabled={busy||reason.trim().length<3} className="danger-ghost" onClick={()=>void move('reject')}>Reject</button></div></section>}
+          {selected.status==='pending'&&hasReviewer&&<section className="panel"><h3>Approval decision</h3><label>Reason<textarea rows={2} maxLength={2000} value={reason} onChange={e=>setReason(e.target.value)}/></label><div className="actions"><button disabled={busy} className="primary" onClick={()=>void move('approve')}><Check size={15}/> Approve</button><button disabled={busy||reason.trim().length<3} className="secondary" onClick={()=>void move('changes')}>Request changes</button><button disabled={busy||reason.trim().length<3} className="danger-ghost" onClick={()=>void move('reject')}>Reject</button></div></section>}
           {isAdmin&&<section className="panel"><h3>Admin coordination</h3>{['draft','pending','changes_requested'].includes(selected.status)&&<><label>Assign approver<select value={reviewer} onChange={e=>setReviewer(e.target.value)}><option value="">Choose reviewer</option>{people.filter(p=>p.id!==selected.created_by&&userRoles.some(r=>r.user_id===p.id&&(r.role==='approver'||r.role==='admin'))).map(p=><option key={p.id} value={p.id}>{p.display_name||p.email} ({p.email})</option>)}</select></label><button className="secondary" disabled={busy||!reviewer} onClick={()=>void assign()}>Assign reviewer</button></>}
             <label>Equipment / transport status<select value={resourceState} onChange={e=>setResourceState(e.target.value)}><option value="pending">Pending</option><option value="arranged">Arranged</option><option value="not_required">Not required</option></select></label>
             <label>Coordination notes<textarea rows={2} value={resourceNote} onChange={e=>setResourceNote(e.target.value)}/></label><button className="secondary" disabled={busy} onClick={()=>void coordinate()}>Save coordination</button>
             {selected.status==='approved'&&<button className="primary full" onClick={()=>void move('schedule')}>Mark scheduled</button>}
             {selected.status==='scheduled'&&<button className="primary full" onClick={()=>void move('start')}>Mark in progress</button>}
-            {selected.status==='in_progress'&&<><button className="primary full" disabled={!documents.some(d=>d.evidence_kind==='completion')} onClick={()=>void move('complete')}>Mark completed</button>{!documents.some(d=>d.evidence_kind==='completion')&&<small>Upload completion evidence below before marking this activity completed.</small>}</>}
+            {selected.status==='in_progress'&&<><button className="primary full" disabled={!documents.some(d=>d.evidence_kind==='completion')} onClick={()=>void move('complete')}>Mark completed</button></>}
             {!['completed','rejected','cancelled'].includes(selected.status)&&<><label>Administrative cancellation reason<textarea rows={2} value={reason} onChange={e=>setReason(e.target.value)}/></label><button className="danger-ghost" disabled={busy||reason.trim().length<3} onClick={()=>void move('admin_cancel')}>Admin cancel</button></>}
           </section>}
           {['approved','scheduled','in_progress','completed'].includes(selected.status)&&selected.starts_at&&selected.ends_at&&<button className="secondary full" onClick={()=>{try{calendarDraft(selected.title+' ('+selected.reference+')',selected.starts_at!,selected.ends_at!,selected.location,selected.description);}catch(e){setError(errorText(e));}}}><CalendarPlus size={16}/> Draft Outlook calendar event</button>}
           {mail&&<section className="panel"><h3>Current email actions</h3><div className="actions"><button className="secondary" disabled={!mail.id||busy} onClick={()=>void linkEmail()}><Link2 size={15}/> Link email</button><button className="secondary" onClick={()=>replyWith('status')}><Mail size={15}/> Draft reply</button><button className="secondary" onClick={()=>replyWith('document')}><Mail size={15}/> Request documents reply</button></div>{mail.attachments.length>0&&<><h4>Import from email</h4>{mail.attachments.map(x=><div key={x.id} className="row-item"><span className="ellipsis">{x.name}</span><button disabled={busy} onClick={()=>void (async()=>{try{const file=await readAttachment(x.id,x.name);await uploadFiles([file]);}catch(e){setError(errorText(e));}})()}>Import</button></div>)}</>}</section>}
-          <section className="panel"><h3><Paperclip size={16}/> Documents</h3><label className="upload"><Upload size={15}/> Upload files<input aria-label="Upload supporting documents" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx" disabled={busy} onChange={e=>{if(e.target.files?.length)void uploadFiles(e.target.files);e.target.value='';}}/></label><small>Private files · 10 MB each · PDF, images, Office files, text</small>{selected.status==='in_progress'&&(selected.created_by===user.id||isAdmin)&&<label className="upload"><Upload size={15}/> Upload completion evidence<input aria-label="Upload completion evidence" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx" disabled={busy} onChange={e=>{if(e.target.files?.length)void uploadFiles(e.target.files,'completion');e.target.value='';}}/></label>}{uploaded&&<small>Most recent upload recorded.</small>}{documents.map(d=><div key={d.id} className="row-item"><span className="ellipsis">{d.evidence_kind==='completion'?'[Completion evidence] ':''}{d.file_name}</span><button onClick={()=>void download(d)}>Open</button></div>)}
+          <section className="panel"><h3><Paperclip size={16}/> Documents</h3><label className="upload"><Upload size={15}/> Upload files<input aria-label="Upload supporting documents" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx" disabled={busy} onChange={e=>{if(e.target.files?.length)void uploadFiles(e.target.files);e.target.value='';}}/></label>{selected.status==='in_progress'&&(selected.created_by===user.id||isAdmin)&&<label className="upload"><Upload size={15}/> Upload completion evidence<input aria-label="Upload completion evidence" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.docx,.xlsx" disabled={busy} onChange={e=>{if(e.target.files?.length)void uploadFiles(e.target.files,'completion');e.target.value='';}}/></label>}{documents.map(d=><div key={d.id} className="row-item"><span className="ellipsis">{d.evidence_kind==='completion'?'[Completion evidence] ':''}{d.file_name}</span><button onClick={()=>void download(d)}>Open</button></div>)}
             {docRequests.filter(d=>!d.resolved_at).map(d=><div className="request-note" key={d.id}><strong>Document requested:</strong> {d.prompt}{hasReviewer&&<button className="text-btn" onClick={()=>void execute(async()=>{const {error:e}=await supabase.rpc('resolve_document_request',{doc_id:d.id});if(e)throw e;},'Marked received')}>Mark received</button>}</div>)}
             {hasReviewer&&<><label>Request additional document<textarea rows={2} value={requestedDocument} onChange={e=>setRequestedDocument(e.target.value)}/></label><button className="secondary" disabled={busy||!requestedDocument.trim()} onClick={()=>void requestMoreDocuments()}><FilePlus2 size={15}/> Send document request</button></>}
           </section>
-          <section className="panel"><h3>Comments & notes</h3>{comments.map(c=><div key={c.id} className="comment"><small>{fmt(c.created_at)} {c.internal?'· Internal':''}</small><p>{c.body}</p></div>)}<label>Add a comment<textarea rows={2} value={comment} onChange={e=>setComment(e.target.value)}/></label>{hasReviewer&&<label className="checkbox"><input type="checkbox" checked={internal} onChange={e=>setInternal(e.target.checked)}/> Internal note (not visible to requestor)</label>}<button disabled={busy||!comment.trim()} className="secondary" onClick={()=>void commentOnRequest()}>Post comment</button></section>
+          <section className="panel"><h3>Comments & notes</h3>{comments.map(c=><div key={c.id} className="comment"><small>{fmt(c.created_at)} {c.internal?'· Internal':''}</small><p>{c.body}</p></div>)}<label>Add a comment<textarea rows={2} value={comment} onChange={e=>setComment(e.target.value)}/></label>{hasReviewer&&<label className="checkbox"><input type="checkbox" checked={internal} onChange={e=>setInternal(e.target.checked)}/> Internal note</label>}<button disabled={busy||!comment.trim()} className="secondary" onClick={()=>void commentOnRequest()}>Post comment</button></section>
           <section className="panel"><h3>Approval stages</h3>{approvalStages.map(st=><div className="row-item" key={st.stage}><span>Stage {st.stage}: {st.approver_id===user.id?'You':st.approver_id.slice(0,8)+'…'}</span><strong>{friendlyStatus(st.status)}</strong></div>)}{!approvalStages.length&&<p className="muted">Manual assignment or no routing rule.</p>}</section><section className="panel"><h3>Request history</h3>{events.map(e=><div key={e.id} className="event"><span>{friendlyStatus(e.event)}</span><small>{fmt(e.created_at)}</small>{e.detail&&<p>{prettyEvent(e)}</p>}</div>)}<h4>Linked emails</h4>{links.length?links.map((l,i)=><p className="muted" key={i}>{l.subject}</p>):<p className="muted">No emails linked yet.</p>}</section>
         </section>:
       page==='notifications'?
@@ -494,10 +504,9 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
           <div className="request-list">{visible.map(r=><button className="request-card" key={r.id} onClick={()=>{setSelectedId(r.id);setReviewer(r.approver_id||'');setResourceState(r.resource_status);setResourceNote(r.resource_notes);}}>
             <div><strong>{r.title}</strong><small>{r.reference} · {fmt(r.created_at)}</small></div><span className={'status status-'+r.status}>{friendlyStatus(r.status)}</span>
           </button>)}</div>
-          {!visible.length&&page!=='approvals'&&<p className="empty">No requests yet. Create a community service request to get started.</p>}
+          {!visible.length&&page!=='approvals'&&<p className="empty">No requests.</p>}
           {isAdmin&&page==='all'&&<section className="panel"><h3><Users size={16}/> Manage roles</h3><label>User<select value={roleTarget} onChange={e=>setRoleTarget(e.target.value)}><option value="">Select user</option>{people.map(p=><option value={p.id} key={p.id}>{p.email}</option>)}</select></label><label>Role<select value={roleToGrant} onChange={e=>setRoleToGrant(e.target.value as Role)}><option value="approver">Approver</option><option value="admin">Admin</option><option value="requestor">Requestor</option></select></label><button className="secondary" disabled={busy||!roleTarget} onClick={()=>void assignRole()}>Add role</button>{people.filter(p=>userRoles.some(r=>r.user_id===p.id)).map(p=><div key={p.id} className="row-item"><span className="ellipsis">{p.email}<small>{userRoles.filter(r=>r.user_id===p.id).map(r=>r.role).join(', ')}</small></span>{userRoles.filter(r=>r.user_id===p.id&&r.role!=='requestor').map(r=><button key={r.role} className="text-btn" onClick={()=>void removeRole(p.id,r.role)}>Remove {r.role}</button>)}</div>)}</section>}
         </section>}
-      <footer><small>{inOutlook()?'Outlook add-in':'CSWI portal'} · Request access is controlled by Supabase RLS.</small></footer>
-    </div>
+      </div>
   </div>;
 }

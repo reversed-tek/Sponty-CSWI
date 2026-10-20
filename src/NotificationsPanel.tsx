@@ -16,7 +16,7 @@ export function NotificationsPanel({items,requests,userId,busy,onOpen,onMarkRead
   const [rejectId,setRejectId]=useState<number|null>(null);
   const [reason,setReason]=useState('');
   return <section>
-    <div className="titleline"><div><h2>Notifications</h2><p className="muted">Review your assigned requests and approve or reject directly in this inbox.</p></div><Bell size={19}/></div>
+    <div className="titleline"><h2>Notifications</h2><Bell size={19}/></div>
     {!items.length && <p className="empty">No notifications yet.</p>}
     <div className="notification-list">{items.map(n=>{
       const request=requests.find(r=>r.id===n.request_id);
@@ -30,7 +30,7 @@ export function NotificationsPanel({items,requests,userId,busy,onOpen,onMarkRead
           {canAct&&<button className="danger-ghost compact" disabled={busy} onClick={()=>{setRejectId(n.id);setReason('');}}>Reject…</button>}
           {!n.read_at&&<button className="text-btn" disabled={busy} onClick={()=>onMarkRead(n)}><CheckCircle2 size={14}/> Mark read</button>}
         </div>
-        {rejectId===n.id&&canAct&&<div className="panel"><label>Reason for rejection (required)
+        {rejectId===n.id&&canAct&&<div className="panel"><label>Reason for rejection
           <textarea rows={2} value={reason} maxLength={2000} onChange={e=>setReason(e.target.value)}/></label>
           <div className="actions"><button className="danger-ghost compact" disabled={busy||reason.trim().length<3}
             onClick={()=>{onReject(n,reason.trim());setRejectId(null);}}>Confirm rejection</button>
