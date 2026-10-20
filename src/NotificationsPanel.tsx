@@ -10,7 +10,7 @@ type Props = {
 
 export function NotificationsPanel({ items, busy, onOpen, onMarkRead }: Props) {
   return <section>
-    <div className="titleline"><div><h2>Notifications</h2><p className="muted">Updates to your community service requests.</p></div><Bell size={19}/></div>
+    <div className="titleline"><h2>Notifications</h2><Bell size={19}/></div>
     {!items.length && <p className="empty">No notifications yet.</p>}
     <div className="notification-list">{items.map(n =>
       <div key={n.id} className={'notification-card ' + (!n.read_at ? 'unread' : '')}>
