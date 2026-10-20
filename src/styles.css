@@ -496,3 +496,14 @@ textarea { min-height: 74px; resize: vertical; }
   .actions button { max-width: 100%; }
   h2 { font-size: 19px; }
 }
+
+/* Resource availability and operational summaries (from unified release). */
+.resource-choice { padding: 9px 6px; border-bottom: 1px solid var(--border-soft); align-items: flex-start; margin: 0 !important; }
+.resource-choice span { display: block; line-height: 1.5; }
+.resource-choice small { font-weight: 400; }
+.resource-choice .conflict { color: #a4262c; display: block; }
+.metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.metric { display: flex; flex-direction: column; gap: 6px; padding: 15px; border: 1px solid var(--border-soft); border-radius: 4px; background: #fff; }
+.metric strong { font-size: 20px; color: var(--text); font-variant-numeric: tabular-nums; }
+.metric small { font-size: 11px; }
+@media (max-width: 440px) { .metric-grid { grid-template-columns: minmax(0, 1fr); } }

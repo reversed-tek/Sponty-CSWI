@@ -5,13 +5,19 @@ import { configured as hasConfig, supabase, errorText } from './lib';
 import type { AppNotification, Request, Role, Document, Event, Comment, DocumentRequest } from './lib';
 import { OutlookComposePanel } from './OutlookComposePanel';
 import { NotificationsPanel } from './NotificationsPanel';
+import { ResourcePicker, ResourceAdmin } from './ResourcesPanel';
+import type { Resource, ResourceOption } from './ResourcesPanel';
+import { RoutingAdmin } from './RoutingAdmin';
+import { AnalyticsPanel } from './AnalyticsPanel';
+import { proposeEmailFields } from './emailPrefill';
 import { calendarDraft, emailReference, mimeFor, oauthDialog, readAttachment, readMail, replyDraft, outlookSurface } from './office';
 import type { OutlookSurface } from './office';
 import type { Mail as SelectedMail } from './office';
 
 type Profile = { id: string; email: string; display_name: string };
-type Page = 'my' | 'approvals' | 'all' | 'new' | 'notifications';
-const blank = {title:'',description:'',department:'',location:'',starts_at:'',ends_at:'',participant_count:1,equipment:'',bus_required:false,bus_passengers:0,transport_notes:'',notes:''};
+type Page = 'my' | 'approvals' | 'all' | 'new' | 'notifications' | 'operations' | 'analytics';
+type Rule = {id:string;priority:number;department:string|null;requires_bus:boolean|null;minimum_participants:number|null;primary_approver:string;secondary_approver:string|null;escalate_after_days:number};
+const blank = {title:'',description:'',department:'',location:'',starts_at:'',ends_at:'',participant_count:1,equipment:'',bus_required:false,bus_passengers:0,transport_notes:'',notes:'',activity_type:'general',checklist_answers:{} as Record<string,number|boolean>};
 type FormValue = typeof blank;
 const fmt = (v?: string | null) => v ? new Date(v).toLocaleString() : 'Not set';
 const inputDate = (v?: string | null) => v ? new Date(new Date(v).getTime()-new Date(v).getTimezoneOffset()*60000).toISOString().slice(0,16) : '';
@@ -42,6 +48,17 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
   const [selectedId,setSelectedId]=useState<string|null>(null);
   const [editing,setEditing]=useState<Request|null>(null);
   const [form,setForm]=useState<FormValue>(blank);
+  const [requestedResources,setRequestedResources]=useState<string[]>([]);
+  const [resourceOptions,setResourceOptions]=useState<ResourceOption[]>([]);
+  const [resourceChecking,setResourceChecking]=useState(false);
+  const [resources,setResources]=useState<Resource[]>([]);
+  const [rules,setRules]=useState<Rule[]>([]);
+  const [delegations,setDelegations]=useState<{id:string;principal_id:string;delegate_id:string;starts_at:string;ends_at:string}[]>([]);
+  const [resourceNames,setResourceNames]=useState<string[]>([]);
+  const [approvalStages,setApprovalStages]=useState<{stage:number;approver_id:string;status:string}[]>([]);
+  const [analyticsEvents,setAnalyticsEvents]=useState<Event[]>([]);
+  const [usage,setUsage]=useState<{resource_id:string;name:string;kind:string;active_holds:number;reserved_hours:number}[]>([]);
+  const [analyticsLoading,setAnalyticsLoading]=useState(false);
   const [documents,setDocuments]=useState<Document[]>([]);
   const [events,setEvents]=useState<Event[]>([]);
   const [comments,setComments]=useState<Comment[]>([]);
@@ -104,6 +121,13 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       if(rr.error) throw rr.error;
       setPeople(pr.data as Profile[] || []);
       setUserRoles(rr.data as {user_id:string;role:Role}[] || []);
+      const [res,rulesResult,delegationsResult]=await Promise.all([supabase.from('resources').select('*').order('name'),supabase.from('approval_rules').select('*').order('priority'),supabase.from('approval_delegations').select('*').order('starts_at',{ascending:false})]);
+      if(res.error)throw res.error;
+      if(rulesResult.error)throw rulesResult.error;
+      if(delegationsResult.error)throw delegationsResult.error;
+      setResources(res.data as Resource[]||[]);
+      setRules(rulesResult.data as Rule[]||[]);
+      setDelegations(delegationsResult.data||[]);
     } else setPeople([]);
   },[user?.id]);
 
@@ -113,7 +137,9 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       supabase.from('request_events').select('*').eq('request_id',rid).order('created_at',{ascending:false}),
       supabase.from('request_comments').select('*').eq('request_id',rid).order('created_at',{ascending:false}),
       supabase.from('document_requests').select('*').eq('request_id',rid).order('created_at',{ascending:false}),
-      supabase.from('email_links').select('message_id,subject').eq('request_id',rid)
+      supabase.from('email_links').select('message_id,subject').eq('request_id',rid),
+      supabase.from('resource_requests').select('resource_id,resources(name)').eq('request_id',rid),
+      supabase.from('approval_stages').select('stage,approver_id,status').eq('request_id',rid).order('stage')
     ]);
     const firstError=results.find(x=>x.error)?.error;
     if(firstError) throw firstError;
@@ -122,6 +148,8 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     setComments(results[2].data as Comment[]||[]);
     setDocRequests(results[3].data as DocumentRequest[]||[]);
     setLinks(results[4].data as {message_id:string;subject:string}[]||[]);
+    setResourceNames((results[5].data||[]).map((x:any)=>x.resources?.name||'Resource'));
+    setApprovalStages(results[6].data as {stage:number;approver_id:string;status:string}[]||[]);
   },[]);
 
   useEffect(()=>{if(user) void refresh().catch(e=>setError(errorText(e)));else {setRequests([]);setNotifications([]);setRoles([]);setSelectedId(null);}},[user?.id,refresh]);
@@ -147,6 +175,53 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     const timer=window.setInterval(()=>void refresh().catch(()=>{}),60000);
     return ()=>window.clearInterval(timer);
   },[user?.id,refresh]);
+
+  useEffect(()=>{
+    if(page!=='new'||!user||!form.starts_at||!form.ends_at) {setResourceOptions([]);return;}
+    const start=new Date(form.starts_at), end=new Date(form.ends_at);
+    if(!Number.isFinite(start.getTime())||!Number.isFinite(end.getTime())||end<=start){setResourceOptions([]);return;}
+    let cancelled=false;
+    setResourceChecking(true);
+    void Promise.resolve(supabase.rpc('available_resources',{from_time:start.toISOString(),to_time:end.toISOString()}))
+      .then(({data,error:e})=>{
+        if(cancelled)return;
+        if(e)setError(e.message);
+        else setResourceOptions((data||[]).map((x:{id:string;name:string;kind:string;capacity:number;available:boolean})=>({id:x.id,name:x.name,kind:x.kind,capacity:x.capacity,available:x.available,active:true})));
+      }).finally(()=>{if(!cancelled)setResourceChecking(false);});
+    return ()=>{cancelled=true;};
+  },[page,user?.id,form.starts_at,form.ends_at]);
+
+  useEffect(()=>{
+    if(page!=='analytics'||!isAdmin)return;
+    let cancelled=false;
+    setAnalyticsLoading(true);
+    void Promise.all([
+      Promise.resolve(supabase.from('request_events').select('*').order('created_at',{ascending:false}).limit(5000)),
+      Promise.resolve(supabase.rpc('resource_usage_summary'))
+    ]).then(([eventsResult,usageResult])=>{
+      if(cancelled)return;
+      if(eventsResult.error)setError(eventsResult.error.message);
+      else setAnalyticsEvents(eventsResult.data as Event[]||[]);
+      if(usageResult.error)setError(usageResult.error.message);
+      else setUsage(usageResult.data||[]);
+    }).finally(()=>{if(!cancelled)setAnalyticsLoading(false);});
+    return ()=>{cancelled=true;};
+  },[page,isAdmin]);
+
+  const suggestedFromEmail=useMemo(()=>mail ? proposeEmailFields(mail.preview) : [],[mail]);
+
+  const setChecklist=(name:string,value:boolean|number)=>{
+    setForm(old=>({...old,checklist_answers:{...old.checklist_answers,[name]:value}}));
+  };
+
+  const prettyEvent=(event:Event)=>{
+    if(event.event!=='fields_changed')return event.detail;
+    try {
+      const record=JSON.parse(event.detail) as {changes?:Record<string,{before:unknown;after:unknown}>};
+      return Object.entries(record.changes||{}).map(([field,v])=>
+        field.replaceAll('_',' ')+': '+JSON.stringify(v.before)+' → '+JSON.stringify(v.after)).join('; ');
+    }catch{return 'Fields updated';}
+  };
 
   async function execute(action:()=>Promise<void>,success='Saved successfully') {
     setBusy(true);setError('');setNotice('');
@@ -174,8 +249,12 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       title:seed.title,description:seed.description,department:seed.department,location:seed.location,
       starts_at:inputDate(seed.starts_at),ends_at:inputDate(seed.ends_at),participant_count:seed.participant_count,
       equipment:seed.equipment,bus_required:seed.bus_required,bus_passengers:seed.bus_passengers,
-      transport_notes:seed.transport_notes,notes:seed.notes
+      transport_notes:seed.transport_notes,notes:seed.notes,
+      activity_type:seed.activity_type||'general',checklist_answers:seed.checklist_answers||{}
     } : {...blank,title:mail?.subject||'',description:mail?.preview||''});
+    setRequestedResources([]);
+    if(seed) void supabase.from('resource_requests').select('resource_id').eq('request_id',seed.id)
+      .then(({data,error:e})=>{if(e)setError(e.message);else setRequestedResources((data||[]).map(x=>x.resource_id));});
     setSelectedId(null);setPage('new');setNotice('');
   }
   const setField = <K extends keyof FormValue>(key:K,value:FormValue[K]) => setForm(old=>({...old,[key]:value}));
@@ -195,6 +274,8 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
         if(e)throw e;
         id=data.id;
       }
+      const {error:resourceError}=await supabase.rpc('set_request_resources',{rid:id,resource_ids:requestedResources});
+      if(resourceError)throw resourceError;
       if(submit){
         const {error:e}=await supabase.rpc('transition_request',{rid:id,action:'submit',reason:''});
         if(e){setPage('my');setSelectedId(id||null);throw new Error('Request saved as a draft, but submission failed: '+e.message);}
@@ -202,6 +283,20 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       setPage('my');setSelectedId(id||null);
     },submit?'Request submitted':'Draft saved');
   }
+  async function quickDecision(notification:AppNotification, action:'approve'|'reject',reasonText:string) {
+    if(!notification.request_id||!user)return;
+    const request=requests.find(r=>r.id===notification.request_id);
+    if(!request||request.approver_id!==user.id||request.created_by===user.id||request.status!=='pending'){
+      setError('This request is no longer assigned to you for approval. Refresh and open it to review.');
+      return;
+    }
+    await execute(async()=>{
+      const {error:e}=await supabase.rpc('transition_request',{rid:request.id,action,reason:reasonText});
+      if(e)throw e;
+      await supabase.rpc('mark_notification_read',{nid:notification.id});
+    },action==='approve'?'Approval stage recorded':'Request rejected');
+  }
+
   async function move(action:string){
     if(!selected)return;
     await execute(async()=>{
@@ -335,6 +430,8 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       {canApprove&&<button className={page==='approvals'?'active':''} onClick={()=>{setPage('approvals');setSelectedId(null);}}><Check size={15}/> Approvals <span className="count">{pending.length}</span></button>}
       {isAdmin&&<button className={page==='all'?'active':''} onClick={()=>{setPage('all');setSelectedId(null);}}><Users size={15}/> All Requests</button>}
       <button className={page==='notifications'?'active':''} onClick={()=>{setPage('notifications');setSelectedId(null);}}><Bell size={15}/> Updates {unread>0&&<span className="count">{unread}</span>}</button>
+      {isAdmin&&<button className={page==='operations'?'active':''} onClick={()=>{setPage('operations');setSelectedId(null);}}>Operations</button>}
+      {isAdmin&&<button className={page==='analytics'?'active':''} onClick={()=>{setPage('analytics');setSelectedId(null);}}>Analytics</button>}
     </nav>
     <div className="content">
       <div className="user-row"><span>{user.email}</span><span className="tag">{isAdmin?'Admin':canApprove?'Approver':'Requestor'}</span><button className="text-btn" title="Sign out" onClick={()=>void supabase.auth.signOut()}><LogOut size={15}/></button></div>
@@ -345,7 +442,9 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       {page==='new'?
         <section><button className="back" onClick={()=>{setPage('my');setSelectedId(editing?.id||null);}}><ArrowLeft size={15}/> Back</button><h2>{editing?'Edit request':'New request'}</h2>
           <form onSubmit={e=>{e.preventDefault();void saveRequest(false);}}>
+            {mail && suggestedFromEmail.length>0 && <section className="panel"><h3>Suggestions from the open email</h3>{suggestedFromEmail.map(x=><p key={x.field}><strong>{x.label}:</strong> {String(x.value)}</p>)}<button type="button" className="secondary" onClick={()=>setForm(old=>({...old,...Object.fromEntries(suggestedFromEmail.map(x=>[x.field,x.value]))}))}>Apply suggested fields</button></section>}
             <label>Activity title *<input required minLength={4} maxLength={180} value={form.title} onChange={e=>setField('title',e.target.value)}/></label>
+            <label>Activity type<select value={form.activity_type} onChange={e=>setField('activity_type',e.target.value)}><option value="general">General</option><option value="bus_trip">Bus trip</option><option value="off_site">Off-site activity</option></select></label>
             <label>Activity description *<textarea rows={4} value={form.description} onChange={e=>setField('description',e.target.value)}/></label>
             <label>Department / group<input value={form.department} onChange={e=>setField('department',e.target.value)}/></label>
             <label>Venue / address *<input value={form.location} onChange={e=>setField('location',e.target.value)}/></label>
@@ -355,6 +454,9 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
             <label className="checkbox"><input type="checkbox" checked={form.bus_required} onChange={e=>setField('bus_required',e.target.checked)}/> School bus needed</label>
             {form.bus_required&&<><label>Bus passenger count<input type="number" min="1" value={form.bus_passengers} onChange={e=>setField('bus_passengers',Number(e.target.value))}/></label><label>Pickup, drop-off and other transport notes<textarea rows={2} value={form.transport_notes} onChange={e=>setField('transport_notes',e.target.value)}/></label></>}
             <label>Additional notes<textarea rows={2} value={form.notes} onChange={e=>setField('notes',e.target.value)}/></label>
+            {form.activity_type==='bus_trip'&&<section className="panel"><h3>Bus-trip checklist</h3><label className="checkbox"><input type="checkbox" checked={form.checklist_answers.waivers_confirmed===true} onChange={e=>setChecklist('waivers_confirmed',e.target.checked)}/> Waivers confirmed</label><label className="checkbox"><input type="checkbox" checked={form.checklist_answers.transport_plan_confirmed===true} onChange={e=>setChecklist('transport_plan_confirmed',e.target.checked)}/> Transport plan confirmed</label><label>Chaperones (minimum one per 20 participants)<input type="number" min="0" value={Number(form.checklist_answers.chaperone_count||0)} onChange={e=>setChecklist('chaperone_count',Number(e.target.value))}/></label></section>}
+            {form.activity_type==='off_site'&&<section className="panel"><h3>Off-site checklist</h3><label className="checkbox"><input type="checkbox" checked={form.checklist_answers.risk_assessment_confirmed===true} onChange={e=>setChecklist('risk_assessment_confirmed',e.target.checked)}/> Risk assessment confirmed</label></section>}
+            <ResourcePicker options={resourceOptions} selected={requestedResources} onChange={setRequestedResources} checking={resourceChecking}/>
             <div className="actions"><button disabled={busy} type="submit" className="secondary">Save draft</button><button disabled={busy} className="primary" type="button" onClick={()=>void saveRequest(true)}><Send size={15}/> Submit request</button></div>
           </form>
         </section>:
@@ -363,7 +465,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
           <button className="back" onClick={()=>setSelectedId(null)}><ArrowLeft size={15}/> All requests</button>
           <div className="titleline"><h2>{selected.title}</h2><span className={'status status-'+selected.status}>{friendlyStatus(selected.status)}</span></div>
           <p className="muted">{selected.reference} · Created {fmt(selected.created_at)}</p>
-          <dl className="info"><dt>Description</dt><dd>{selected.description||'—'}</dd><dt>Department</dt><dd>{selected.department||'—'}</dd><dt>Location</dt><dd>{selected.location||'—'}</dd><dt>Schedule</dt><dd>{fmt(selected.starts_at)} → {fmt(selected.ends_at)}</dd><dt>Participants</dt><dd>{selected.participant_count}</dd><dt>Equipment</dt><dd>{selected.equipment||'None specified'}</dd><dt>School bus</dt><dd>{selected.bus_required?'Yes · '+selected.bus_passengers+' passengers':'No'}</dd>{selected.bus_required&&<><dt>Transport notes</dt><dd>{selected.transport_notes||'—'}</dd></>}<dt>Other notes</dt><dd>{selected.notes||'—'}</dd><dt>Resources</dt><dd>{friendlyStatus(selected.resource_status)} — {selected.resource_notes||'No notes'}</dd></dl>
+          <dl className="info"><dt>Description</dt><dd>{selected.description||'—'}</dd><dt>Department</dt><dd>{selected.department||'—'}</dd><dt>Location</dt><dd>{selected.location||'—'}</dd><dt>Schedule</dt><dd>{fmt(selected.starts_at)} → {fmt(selected.ends_at)}</dd><dt>Participants</dt><dd>{selected.participant_count}</dd><dt>Equipment</dt><dd>{selected.equipment||'None specified'}</dd><dt>Activity type</dt><dd>{friendlyStatus(selected.activity_type||'general')}</dd><dt>Resources requested</dt><dd>{resourceNames.length?resourceNames.join(', '):'None'}</dd><dt>School bus</dt><dd>{selected.bus_required?'Yes · '+selected.bus_passengers+' passengers':'No'}</dd>{selected.bus_required&&<><dt>Transport notes</dt><dd>{selected.transport_notes||'—'}</dd></>}<dt>Other notes</dt><dd>{selected.notes||'—'}</dd><dt>Resources</dt><dd>{friendlyStatus(selected.resource_status)} — {selected.resource_notes||'No notes'}</dd></dl>
           {selected.created_by===user.id&&['draft','changes_requested'].includes(selected.status)&&<button className="primary full" disabled={busy} onClick={()=>startForm(selected)}>Edit request</button>}
           {selected.created_by===user.id&&['draft','changes_requested'].includes(selected.status)&&<button className="secondary full" disabled={busy} onClick={()=>void move('submit')}>Submit for approval</button>}
           {selected.created_by===user.id&&['draft','pending','changes_requested','approved'].includes(selected.status)&&<button className="danger-ghost full" disabled={busy} onClick={()=>void move('cancel')}>Cancel request</button>}
@@ -383,10 +485,12 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
             {hasReviewer&&<><label>Request additional document<textarea rows={2} value={requestedDocument} onChange={e=>setRequestedDocument(e.target.value)}/></label><button className="secondary" disabled={busy||!requestedDocument.trim()} onClick={()=>void requestMoreDocuments()}><FilePlus2 size={15}/> Send document request</button></>}
           </section>
           <section className="panel"><h3>Comments & notes</h3>{comments.map(c=><div key={c.id} className="comment"><small>{fmt(c.created_at)} {c.internal?'· Internal':''}</small><p>{c.body}</p></div>)}<label>Add a comment<textarea rows={2} value={comment} onChange={e=>setComment(e.target.value)}/></label>{hasReviewer&&<label className="checkbox"><input type="checkbox" checked={internal} onChange={e=>setInternal(e.target.checked)}/> Internal note</label>}<button disabled={busy||!comment.trim()} className="secondary" onClick={()=>void commentOnRequest()}>Post comment</button></section>
-          <section className="panel"><h3>Request history</h3>{events.map(e=><div key={e.id} className="event"><span>{friendlyStatus(e.event)}</span><small>{fmt(e.created_at)}</small>{e.detail&&<p>{e.detail}</p>}</div>)}<h4>Linked emails</h4>{links.length?links.map((l,i)=><p className="muted" key={i}>{l.subject}</p>):<p className="muted">No emails linked yet.</p>}</section>
+          <section className="panel"><h3>Approval stages</h3>{approvalStages.map(st=><div className="row-item" key={st.stage}><span>Stage {st.stage}: {st.approver_id===user.id?'You':st.approver_id.slice(0,8)+'…'}</span><strong>{friendlyStatus(st.status)}</strong></div>)}{!approvalStages.length&&<p className="muted">Manual assignment or no routing rule.</p>}</section><section className="panel"><h3>Request history</h3>{events.map(e=><div key={e.id} className="event"><span>{friendlyStatus(e.event)}</span><small>{fmt(e.created_at)}</small>{e.detail&&<p>{prettyEvent(e)}</p>}</div>)}<h4>Linked emails</h4>{links.length?links.map((l,i)=><p className="muted" key={i}>{l.subject}</p>):<p className="muted">No emails linked yet.</p>}</section>
         </section>:
       page==='notifications'?
-        <NotificationsPanel items={notifications} busy={busy} onOpen={openNotification} onMarkRead={n=>void markNotificationRead(n)}/>:
+        <NotificationsPanel items={notifications} busy={busy} onOpen={openNotification} onMarkRead={n=>void markNotificationRead(n)} requests={requests} userId={user.id} onApprove={n=>void quickDecision(n,'approve','')} onReject={(n,why)=>void quickDecision(n,'reject',why)}/>:
+      page==='operations'&&isAdmin?<section><h2>Operations setup</h2><ResourceAdmin onSaved={refresh}/><div className="panel"><h3>Registered resources</h3>{resources.map(x=><div className="row-item" key={x.id}><span>{x.name} — {x.kind}, capacity {x.capacity}</span><span>{x.active?'Active':'Inactive'}</span></div>)}</div><RoutingAdmin people={people.filter(p=>userRoles.some(x=>x.user_id===p.id&&(x.role==='approver'||x.role==='admin')))} rules={rules} delegations={delegations} onSaved={refresh}/></section>:
+      page==='analytics'&&isAdmin?<AnalyticsPanel requests={requests} events={analyticsEvents} usage={usage} loading={analyticsLoading}/>:
         <section>
           <div className="titleline"><div><h2>{page==='approvals'?'Pending approvals':page==='all'?'All requests':'My requests'}</h2><p className="muted">{visible.length} request(s) visible</p></div><button className="primary compact" onClick={()=>startForm()}><Plus size={16}/> New</button></div>
           {page==='approvals'&&pending.length===0&&<p className="empty">No requests awaiting your approval.</p>}
@@ -403,6 +507,6 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
           {!visible.length&&page!=='approvals'&&<p className="empty">No requests.</p>}
           {isAdmin&&page==='all'&&<section className="panel"><h3><Users size={16}/> Manage roles</h3><label>User<select value={roleTarget} onChange={e=>setRoleTarget(e.target.value)}><option value="">Select user</option>{people.map(p=><option value={p.id} key={p.id}>{p.email}</option>)}</select></label><label>Role<select value={roleToGrant} onChange={e=>setRoleToGrant(e.target.value as Role)}><option value="approver">Approver</option><option value="admin">Admin</option><option value="requestor">Requestor</option></select></label><button className="secondary" disabled={busy||!roleTarget} onClick={()=>void assignRole()}>Add role</button>{people.filter(p=>userRoles.some(r=>r.user_id===p.id)).map(p=><div key={p.id} className="row-item"><span className="ellipsis">{p.email}<small>{userRoles.filter(r=>r.user_id===p.id).map(r=>r.role).join(', ')}</small></span>{userRoles.filter(r=>r.user_id===p.id&&r.role!=='requestor').map(r=><button key={r.role} className="text-btn" onClick={()=>void removeRole(p.id,r.role)}>Remove {r.role}</button>)}</div>)}</section>}
         </section>}
-    </div>
+      </div>
   </div>;
 }
