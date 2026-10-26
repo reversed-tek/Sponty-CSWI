@@ -107,9 +107,9 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       supabase.from('service_requests').select('*').order('created_at',{ascending:false}).limit(200),
       supabase.from('notifications').select('id,request_id,subject,body,created_at,read_at').order('created_at',{ascending:false}).limit(50)
     ]);
-    if(roleResult.error) throw roleResult.error;
-    if(requestResult.error) throw requestResult.error;
-    if(notificationResult.error) throw notificationResult.error;
+    if(roleResult.error) throw new Error('Unable to load account roles: '+errorText(roleResult.error));
+    if(requestResult.error) throw new Error('Unable to load requests: '+errorText(requestResult.error));
+    if(notificationResult.error) throw new Error('Unable to load notifications: '+errorText(notificationResult.error));
     setNotifications(notificationResult.data as AppNotification[] || []);
     const assigned=(roleResult.data||[]).map(x=>x.role as Role);
     setRoles(assigned);
@@ -117,14 +117,14 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
     if(assigned.includes('admin')){
       const [pr,rr]=await Promise.all([supabase.from('profiles').select('id,email,display_name').order('email'),
         supabase.from('user_roles').select('user_id,role')]);
-      if(pr.error) throw pr.error;
-      if(rr.error) throw rr.error;
+      if(pr.error) throw new Error('Unable to load user directory: '+errorText(pr.error));
+      if(rr.error) throw new Error('Unable to load assigned roles: '+errorText(rr.error));
       setPeople(pr.data as Profile[] || []);
       setUserRoles(rr.data as {user_id:string;role:Role}[] || []);
       const [res,rulesResult,delegationsResult]=await Promise.all([supabase.from('resources').select('*').order('name'),supabase.from('approval_rules').select('*').order('priority'),supabase.from('approval_delegations').select('*').order('starts_at',{ascending:false})]);
-      if(res.error)throw res.error;
-      if(rulesResult.error)throw rulesResult.error;
-      if(delegationsResult.error)throw delegationsResult.error;
+      if(res.error)throw new Error('Unable to load resources: '+errorText(res.error));
+      if(rulesResult.error)throw new Error('Unable to load approval rules: '+errorText(rulesResult.error));
+      if(delegationsResult.error)throw new Error('Unable to load delegations: '+errorText(delegationsResult.error));
       setResources(res.data as Resource[]||[]);
       setRules(rulesResult.data as Rule[]||[]);
       setDelegations(delegationsResult.data||[]);
@@ -142,7 +142,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
       supabase.from('approval_stages').select('stage,approver_id,status').eq('request_id',rid).order('stage')
     ]);
     const firstError=results.find(x=>x.error)?.error;
-    if(firstError) throw firstError;
+    if(firstError) throw new Error('Unable to load request details: '+errorText(firstError));
     setDocuments(results[0].data as Document[]||[]);
     setEvents(results[1].data as Event[]||[]);
     setComments(results[2].data as Comment[]||[]);
@@ -225,7 +225,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
 
   async function execute(action:()=>Promise<void>,success='Saved successfully') {
     setBusy(true);setError('');setNotice('');
-    try {await action();await refresh();if(selectedId)await reloadDetails(selectedId);setNotice(success);}
+    try {await action();await refresh();if(selectedId)await reloadDetails(selectedId);if(success)setNotice(success);}
     catch(e){setError(errorText(e));try{await refresh();}catch{/* Retain the original error. */}}finally{setBusy(false);}
   }
   async function login(){
@@ -241,7 +241,7 @@ export function App({ configured=hasConfig }: { configured?: boolean }) {
         const {error:verifyError}=await supabase.auth.getUser();
         if(verifyError)throw verifyError;
       });
-    },'Signed in successfully');
+    },'');
   }
   function startForm(seed?:Request|null){
     setEditing(seed||null);

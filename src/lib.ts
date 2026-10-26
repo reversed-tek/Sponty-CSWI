@@ -23,4 +23,28 @@ export type Event = { id:number; request_id:string; actor_id:string; event:strin
 export type Comment = { id:string; request_id:string; author_id:string; body:string; internal:boolean; created_at:string };
 export type DocumentRequest = { id:string; request_id:string; prompt:string; resolved_at:string | null; created_at:string };
 export type AppNotification = { id:number; request_id:string|null; subject:string; body:string; created_at:string; read_at:string|null };
-export const errorText = (e: unknown) => e instanceof Error ? e.message : String(e);
+/**
+ * Supabase and PostgREST failures can be plain objects rather than Error instances.
+ * String(object) displays "[object Object]", hiding the actual problem from users.
+ */
+export function errorText(error: unknown): string {
+  const fallback = 'An unexpected error occurred. Please try again.';
+
+  if (typeof error === 'string') {
+    const message = error.trim();
+    return message && message !== '[object Object]' ? message : fallback;
+  }
+  if (error instanceof Error) {
+    return errorText(error.message);
+  }
+  if (error && typeof error === 'object') {
+    const fields = error as Record<string, unknown>;
+    for (const key of ['message', 'error_description', 'details', 'hint', 'code']) {
+      const value = fields[key];
+      if (typeof value === 'string' && value.trim() && value.trim() !== '[object Object]') {
+        return value.trim();
+      }
+    }
+  }
+  return fallback;
+}

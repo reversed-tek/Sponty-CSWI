@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase } from './lib';
+import { supabase, errorText } from './lib';
 type Person={id:string;email:string;display_name:string};
 type Rule={id:string;priority:number;department:string|null;requires_bus:boolean|null;minimum_participants:number|null;primary_approver:string;secondary_approver:string|null;escalate_after_days:number};
 export function RoutingAdmin({people,rules,delegations,onSaved}: {people:Person[];rules:Rule[];delegations:{id:string;principal_id:string;delegate_id:string;starts_at:string;ends_at:string}[];onSaved:()=>Promise<void>}) {
@@ -27,7 +27,7 @@ export function RoutingAdmin({people,rules,delegations,onSaved}: {people:Person[
       });
       if(err)throw err;
       await onSaved();setDepartment('');setMinimum('');setFirst('');setSecond('');
-    } catch(e) {setError(e instanceof Error?e.message:String(e));}
+    } catch(e) {setError(errorText(e));}
     finally{setSaving(false);}
   }
   async function addDelegation(){
@@ -36,7 +36,7 @@ export function RoutingAdmin({people,rules,delegations,onSaved}: {people:Person[
       const {error:err}=await supabase.from('approval_delegations').insert({principal_id:principal,delegate_id:delegate,starts_at:new Date(delegateFrom).toISOString(),ends_at:new Date(delegateUntil).toISOString()});
       if(err)throw err;
       await onSaved();setPrincipal('');setDelegate('');
-    }catch(e){setError(e instanceof Error?e.message:String(e));}
+    }catch(e){setError(errorText(e));}
     finally{setSaving(false);}
   }
   return <section className="panel">

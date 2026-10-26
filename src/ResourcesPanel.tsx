@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase } from './lib';
+import { supabase, errorText } from './lib';
 
 export type Resource = { id:string; name:string; kind:string; capacity:number; active:boolean };
 export type ResourceOption = Resource & { available:boolean };
@@ -33,7 +33,7 @@ export function ResourceAdmin({ onSaved }: { onSaved:()=>Promise<void> }) {
       if(err)throw err;
       setName('');
       await onSaved();
-    } catch(e) {setError(e instanceof Error?e.message:String(e));}
+    } catch(e) {setError(errorText(e));}
     finally{setWorking(false);}
   }
   return <section className="panel"><h3>Add a resource (Admin)</h3>
